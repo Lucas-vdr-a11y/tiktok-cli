@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.env
+.captron/
+test-artifacts/
+screenshots/
+/tmp/
+.DS_Store

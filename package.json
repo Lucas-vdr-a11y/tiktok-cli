@@ -1,0 +1,35 @@
+{
+  "name": "captron",
+  "version": "0.2.0",
+  "description": "Post TikTok videos from the command line — built for AI agents and automated faceless TikTok creators. Reverse-engineered TikTok web upload flow, driven through a real browser session.",
+  "type": "commonjs",
+  "bin": {
+    "captron": "./bin/captron.js"
+  },
+  "main": "./src/cli.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "test:unit": "node --test test/unit/",
+    "doctor": "node bin/captron.js doctor",
+    "e2e:draft": "node test/e2e/post-draft.js",
+    "e2e:post": "node test/e2e/post-real.js"
+  },
+  "keywords": [
+    "tiktok",
+    "cli",
+    "automation",
+    "agent",
+    "faceless",
+    "social-media",
+    "uploader",
+    "ai"
+  ],
+  "dependencies": {
+    "commander": "^12.1.0",
+    "playwright": "^1.48.0"
+  },
+  "license": "MIT"
+}
