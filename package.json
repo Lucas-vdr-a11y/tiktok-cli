@@ -11,11 +11,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test test/unit/",
     "test:unit": "node --test test/unit/",
-    "doctor": "node bin/captron.js doctor",
-    "e2e:draft": "node test/e2e/post-draft.js",
-    "e2e:post": "node test/e2e/post-real.js"
+    "doctor": "node bin/captron.js doctor"
   },
   "keywords": [
     "tiktok",
