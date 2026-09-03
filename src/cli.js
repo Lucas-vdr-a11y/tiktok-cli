@@ -15,10 +15,22 @@ let globalOptions = { account: null, headless: false };
 // post command — the flagship combined action
 // ---------------------------------------------------------------------------
 
-async function runPost(cmd) {
+/** Module-scoped program ref so top-level handlers can read root options. */
+let programRef = null;
+
+function applyGlobals() {
+  const opts = programRef.opts();
+  globalOptions = {
+    account: opts.account || utils.activeAccount(),
+    headless: opts.headless || process.env.CAPTRON_HEADLESS === '1',
+  };
+  utils.setVerbose(opts.verbose || process.env.CAPTRON_VERBOSE === '1' || false);
+  utils.setJson(opts.json || false);
+}
+
+async function runPost(videoArg, opts) {
   applyGlobals();
-  const opts = cmd.opts();
-  const video = opts.video;
+  const video = videoArg;
 
   const vcheck = validateVideoPath(video);
   if (!vcheck.ok) {
@@ -38,7 +50,7 @@ async function runPost(cmd) {
 
   const caption = buildCaption({ caption: opts.caption, hashtags: opts.hashtags });
 
-  utils.step('Posting "' + vcheck.path + '" (' + humanize(vcheck.size / 1024) + 'KB) to account "' + globalOptions.account + '"');
+  utils.step('Posting "' + vcheck.path + '" (' + utils.formatBytes(vcheck.size) + ') to account "' + globalOptions.account + '"');
   if (caption) utils.step('Caption: ' + caption.replace(/\n/g, ' | '));
   if (opts.schedule) utils.step('Scheduled for: ' + formatDate(scheduleDate));
   if (opts.draft) utils.step('Mode: save DRAFT (no publish)');
@@ -57,6 +69,7 @@ async function runPost(cmd) {
     });
   } catch (err) {
     uploadLib.handlePostError(err);
+    return;
   } finally {
     await context.close().catch(() => {});
   }
@@ -78,7 +91,7 @@ async function runPost(cmd) {
       .filter(Boolean)
       .join('\n')
   );
-  process.exit(r.failed ? 1 : 0);
+  process.exit(result.failed ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -87,23 +100,13 @@ async function runPost(cmd) {
 
 function buildProgram() {
   const program = new Command();
+  programRef = program;
 
   program
     .name('captron')
     .description('Post TikTok videos from the command line — built for AI agents & faceless TikTok creators.')
     .version(require('../package.json').version)
     .showSuggestionAfterError();
-
-  function applyGlobals() {
-    const opts = program.opts();
-    globalOptions = {
-      account: opts.account || utils.activeAccount(),
-      headless: opts.headless || process.env.CAPTRON_HEADLESS === '1',
-    };
-    utils.setVerbose(opts.verbose || false);
-    utils.setJson(opts.json || false);
-  }
-
   // global options (attached to every command)
   program
     .option('-a, --account <name>', 'account profile to use (default: active)')
@@ -115,16 +118,16 @@ function buildProgram() {
     .command('login [account]')
     .description('Log in to a TikTok account (QR code). State persists for later use.')
     .option('-t, --timeout <seconds>', 'login timeout in seconds', '300')
-    .action(async (account, cmd) => {
+    .action(async (account, opts) => {
       applyGlobals();
-      const res = await auth.login({ account: account || globalOptions.account || 'main', timeoutSec: Number(cmd.opts().timeout), headless: globalOptions.headless });
+      const res = await auth.login({ account: account || globalOptions.account || 'main', timeoutSec: Number(opts.timeout), headless: globalOptions.headless });
       printResult(res, (r) => 'Logged in' + (r.handle ? ' as @' + r.handle : '') + ' ✔');
     });
 
   program
     .command('logout [account]')
     .description('Log out an account (clears its saved TikTok session).')
-    .action(async (account, cmd) => {
+    .action(async (account) => {
       applyGlobals();
       const res = await auth.logout({ account: account || globalOptions.account || 'main' });
       printResult(res, (r) => 'Logged out ✔');
@@ -133,7 +136,7 @@ function buildProgram() {
   program
     .command('whoami [account]')
     .description('Show session status for an account.')
-    .action(async (account, cmd) => {
+    .action(async (account) => {
       applyGlobals();
       const res = await auth.whoami({ account: account || globalOptions.account || 'main' });
       printResult(res, (r) => (r.loggedIn ? 'Logged in as @' + (r.handle || '?') + (r.uid ? ' (uid ' + r.uid + ')' : '') : 'Not logged in'));
@@ -142,7 +145,7 @@ function buildProgram() {
   program
     .command('accounts')
     .description('List configured account profiles.')
-    .action((cmd) => {
+    .action(() => {
       applyGlobals();
       const res = auth.accounts();
       printResult(res, (r) => {
@@ -168,16 +171,42 @@ function buildProgram() {
     .command('posts [account]')
     .description('List published posts.')
     .option('--limit <n>', 'max posts', '20')
-    .action(async (account, cmd) => {
+    .action(async (account, opts) => {
       applyGlobals();
-      const res = await contentLib.listPosts({ account: account || globalOptions.account || 'main', limit: Number(cmd.opts().limit), headless: globalOptions.headless });
+      const res = await contentLib.listPosts({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
       printResult(res, (r) => {
-        const lines = ['Posts (' + r.items.length + '):'];
+        const lines = ['Posts (' + r.items.length + (r.total > r.items.length ? '/' + r.total : '') + '):'];
         for (const it of r.items) {
-          lines.push('  ' + (it.id || '?') + '  @' + r.handle + '/video/' + (it.id || '?') + '  ' + (it.caption || '').slice(0, 50) + '  ' + it.postTime);
+          lines.push('  ' + (it.id || '?') + '  ' + (it.caption || '').slice(0, 50) + '  ' + (it.url || ''));
         }
+        if (r.error) lines.push('  error: ' + r.error);
         return lines.join('\n');
       });
+    });
+
+  program
+    .command('content [account]')
+    .description('List published posts AND saved drafts in one call.')
+    .option('--limit <n>', 'max posts', '20')
+    .action(async (account, opts) => {
+      applyGlobals();
+      const res = await contentLib.listContent({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
+      printResult(res, (r) => {
+        const lines = ['Content on @' + (r.handle || r.account || '?') + ':'];
+        lines.push('');
+        lines.push('Posts (' + r.posts.items.length + (r.posts.total > r.posts.items.length ? '/' + r.posts.total : '') + '):');
+        for (const it of r.posts.items) {
+          lines.push('  ' + (it.id || '?') + '  ' + (it.caption || '').slice(0, 44) + '  ' + (it.url || ''));
+        }
+        lines.push('');
+        lines.push('Drafts (' + r.drafts.items.length + (r.drafts.total > r.drafts.items.length ? '/' + r.drafts.total : '') + '):');
+        for (const it of r.drafts.items) {
+          lines.push('  ' + (it.caption || '(untitled)') + (it.duration ? '  [' + it.duration + ']' : '') + (it.updated ? '  ' + it.updated : ''));
+        }
+        if (r.error) lines.push('  error: ' + r.error);
+        return lines.join('\n');
+      });
+      if (!res.ok) process.exit(1);
     });
 
   program
@@ -187,9 +216,8 @@ function buildProgram() {
     .option('--delay <seconds>', 'seconds to wait between posts', '0')
     .option('--max-per-day <n>', 'hard cap on posts per run', '0')
     .option('--dry-run', 'validate the manifest and print the plan without posting')
-    .action(async (manifest, cmd) => {
+    .action(async (manifest, opts) => {
       applyGlobals();
-      const opts = cmd.opts();
       const res = await batchLib.runBatch({
         manifest,
         defaultAccount: globalOptions.account,
@@ -222,9 +250,8 @@ function buildProgram() {
     .option('-l, --list', 'list drafts')
     .option('-p, --publish <id>', 'publish a draft by id')
     .option('-d, --delete <id>', 'delete a draft by id')
-    .action(async (cmd) => {
+    .action(async (opts) => {
       applyGlobals();
-      const opts = cmd.opts();
       if (opts.list || (!opts.publish && !opts.delete)) {
         const res = await contentLib.listDrafts({ account: globalOptions.account, headless: globalOptions.headless });
         printResult(res, (r) => {
@@ -251,7 +278,7 @@ function buildProgram() {
   program
     .command('doctor')
     .description('Check environment: node, browser engines, profiles, session state.')
-    .action(async (cmd) => {
+    .action(async () => {
       applyGlobals();
       const fs = require('fs');
       const info = {

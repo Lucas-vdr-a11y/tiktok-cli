@@ -14,10 +14,21 @@ Completely reverse engineer TikTok and develop a CLI (for agents) whose main use
 active
 
 ## Progress
+- NEW: Core publish pipeline WORKS end-to-end (upload→caption→modal confirm→publish RPC→verify), EXIT=0, ~8s
+- Fixed: react-joyride tour overlay blocking clicks (clearTour + raw DOM click dispatch)
+- Fixed: post-Post confirmation modal ("Continue posting?") must be confirmed via "Post now"/"Nu plaatsen" button — was the root cause of publish never firing
+- Fixed: cli.js `r is not defined` reference error
+- Fixed: batch.js scheduleDate Date/string mismatch, manifest format flexibility
+- Fixed: content.js drafts/posts scraping (published cards vs draft cells), single-session combined listing
+- Fixed: handle resolution (don't match video card links), byte formatting, activeAccount brace
+- Reverse-engineered: full publish RPC with X-Bogus/X-Gnarly signatures, content-check flow, TOS upload
 - newest first
 
 ## Blockers
 - none
 
 ## Evidence
-- tbd
+- `node bin/captron.js post` → EXIT=0, itemId 7681446464794414358, status published
+- `node bin/captron.js content` → 4 posts visible on @sim_test_runs
+- publish RPC: POST /tiktok/web/project/post/v1/ returns {projectId, itemId, statusCode:0}
+- repo: github.com/Lucas-vdr-a11y/tiktok-cli (main)

@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { URLS, SELECTORS, VISIBILITY_OPTIONS, findPublishButton, findButtonByLabel, resolveHandle } = require('./selectors');
-const { verbose, warn, fail, step, ok, sleep } = require('./utils');
+const { verbose, warn, fail, step, ok, sleep, isVerbose } = require('./utils');
 
 class NotLoggedInError extends Error {
   constructor(message) {
@@ -29,6 +29,35 @@ async function dismissOverlays(page) {
   }
 }
 
+/**
+ * Remove TikTok's onboarding tour (react-joyride). Its full-screen overlay
+ * intercepts every pointer event, so any later click times out. Try the tour's
+ * own skip button first (clears tour state), then force-remove the portal.
+ */
+async function clearTour(page) {
+  const removed = await page
+    .evaluate(() => {
+      let count = 0;
+      const btns = Array.from(document.querySelectorAll('button'));
+      const skip = btns.find((b) => /^(skip tour|skip|close|sluiten|overslaan|saltar|wyniki pomijania)$/i.test((b.innerText || '').trim()));
+      if (skip) skip.click();
+      const portal = document.querySelector('#react-joyride-portal');
+      if (portal) {
+        count++;
+        portal.remove();
+      } else {
+        document.querySelectorAll('.react-joyride__overlay, .react-joyride__tooltip').forEach((el) => {
+          el.remove();
+          count++;
+        });
+      }
+      return count;
+    })
+    .catch(() => 0);
+  if (removed) verbose('removed onboarding tour overlay (' + removed + ' node[s])');
+  return removed > 0;
+}
+
 /** Ensure the TikTok session is active before starting a flow. */
 async function assertLoggedIn(context) {
   const cookies = await context.cookies('https://www.tiktok.com');
@@ -45,6 +74,40 @@ async function gotoUpload(context, page) {
   await sleep(1500);
   await assertLoggedIn(context);
   await dismissOverlays(page);
+  await clearTour(page);
+}
+
+/**
+ * Wait until the hidden file input exists AND the surrounding app has settled.
+ * React hydration wires the input's change handler late — setting files too
+ * early silently does nothing (the page just keeps showing "Select video to
+ * upload"). "Settled" = input present and its DOM signature unchanged for two
+ * consecutive polls.
+ */
+async function waitForFileInput(page, { timeoutSec = 30 } = {}) {
+  const deadline = Date.now() + timeoutSec * 1000;
+  let prev = null;
+  let stable = 0;
+  while (Date.now() < deadline) {
+    const key = await page
+      .evaluate(() => {
+        const el = document.querySelector('input[type="file"]');
+        if (!el || !el.isConnected) return null;
+        const form = el.closest('form');
+        return [el.accept, el.name, el.className, form ? form.className : '', el.parentElement ? el.parentElement.className : ''].join('|');
+      })
+      .catch(() => null);
+    if (key !== null) {
+      stable = key === prev ? stable + 1 : 0;
+      prev = key;
+      if (stable >= 2) return true;
+    } else {
+      stable = 0;
+      prev = null;
+    }
+    await sleep(1500);
+  }
+  throw new Error('The upload page never exposed a file input (not logged in or blocked?). Try `captron login`.');
 }
 
 // ---------------------------------------------------------------------------
@@ -67,9 +130,18 @@ async function waitForEditor(page, { uploadTimeoutSec = 180 } = {}) {
       })
       .catch(() => ({ editor: false, replace: false, body: '' }));
 
-    // upload error / rejected file detection
-    if (/maximum size|too long|exceeds|bestand is te groot|niet ondersteund|unsupported|failed to upload/i.test(state.body)) {
-      throw new Error('TikTok rejected the file (check size/duration/format).');
+    // Upload error / rejected file detection. The upload page ALWAYS renders
+    // static helper copy ("Maximum size: 30 GB, video duration: 60 minutes.",
+    // "Recommended: .mp4", ...) — strip that before scanning for real errors.
+    const cleaned = state.body
+      .replace(/maximum size:\s*\d+\s*[gm]b[^.]*\.?/gi, ' ')
+      .replace(/video duration:\s*\d+\s*(minutes?|minuten?|min)\.?/gi, ' ');
+    const rejectMatch = cleaned.match(
+      /.{0,90}(too long|exceeds|niet ondersteund|unsupported|failed to upload|upload failed|unable to upload|te groot|something went wrong).{0,90}/i
+    );
+    if (rejectMatch && !(state.editor && state.replace)) {
+      await page.screenshot({ path: '/tmp/captron-reject.png', fullPage: false }).catch(() => {});
+      throw new Error('TikTok rejected the upload — page said: "' + rejectMatch[0].replace(/\s+/g, ' ').trim() + '" (screenshot: /tmp/captron-reject.png)');
     }
 
     if (state.editor && state.replace) return;
@@ -132,19 +204,7 @@ async function setVisibility(page, visibility) {
 // Finalize: publish now / schedule / save draft
 // ---------------------------------------------------------------------------
 
-/** Resolve once a response matches the publish RPC URL pattern. */
-function nextRpcResponse(page, pattern) {
-  return new Promise((resolve) => {
-    const handler = (res) => {
-      if (pattern.test(res.url())) {
-        page.off('response', handler);
-        resolve(res);
-      }
-    };
-    page.on('response', handler);
-  });
-}
-
+/** Parse a JSON RPC body (tolerant). */
 async function parseRpcBody(res) {
   try {
     const body = await res.json();
@@ -169,12 +229,33 @@ function extractIds(body) {
   return out;
 }
 
+/** Broad publish/draft RPC patterns seen across TikTok Studio versions. */
+const RPC_PATTERNS = [
+  /\/tiktok\/web\/project\/post\/v1\//i, // legacy
+  /\/tiktok\/v1\/web\/project\/post\/v1\//i, // current studio
+  /\/tiktok\/web\/project\/draft\/v1\//i,
+  /\/tiktok\/v1\/web\/project\/draft\/v1\//i,
+];
+
+/** Install a response logger recording recent TikTok API calls (diagnostics). */
+function installApiLog(page) {
+  page._apiLog = [];
+  page.on('response', (res) => {
+    const url = res.url();
+    if (/\/tiktok\//.test(url) && !/\.(js|css|png|jpg|webp|mp4|woff2?)/.test(url)) {
+      page._apiLog.push('[' + res.status() + '] ' + url.replace('https://www.tiktok.com', ''));
+      if (page._apiLog.length > 40) page._apiLog.shift();
+    }
+  });
+}
+
 /**
  * Click the Post (or Save draft) button and wait for TikTok's confirmation.
+ * Confirmation = a publish/draft RPC response, a redirect to the content
+ * dashboard / video page, or a success signal in the DOM.
  * Returns { status, itemId, projectId, url }.
  */
-async function finalizePost(page, { saveDraft = false, rpcPattern } = {}) {
-  const pattern = rpcPattern || /\/tiktok\/web\/project\/post\/v1\//;
+async function finalizePost(page, { saveDraft = false } = {}) {
 
   // The publish button is often disabled until content checks finish; poll.
   const deadline = Date.now() + 150e3;
@@ -188,37 +269,164 @@ async function finalizePost(page, { saveDraft = false, rpcPattern } = {}) {
   }
   if (!action) throw new Error('Could not find a clickable Post / Save draft button.');
 
-  const rpcPromise = nextRpcResponse(page, pattern);
-  const handles = await page.$$('button');
-  await handles[action.idx].click().catch((err) => {
-    fail('click failed: ' + err.message);
+  const rpcPromise = new Promise((resolve) => {
+    const handler = (res) => {
+      const url = res.url();
+      if (isVerbose() && /\/tiktok\//.test(url) && !/\.(js|css|png|jpg|webp|mp4)/.test(url)) {
+        verbose('api <- [' + res.status() + '] ' + url.replace('https://www.tiktok.com', ''));
+      }
+      if (RPC_PATTERNS.some((p) => p.test(url))) {
+        page.off('response', handler);
+        resolve(res);
+      }
+    };
+    page.on('response', handler);
   });
-  verbose('clicked "' + (action.text || action.aria) + '"');
 
-  // Wait for the RPC response or a redirect to the content dashboard.
+  // Click via a raw DOM click dispatched in-page. TikTok's tour overlay
+  // (`react-joyride__overlay`) intercepts pointer events, which makes
+  // Playwright's actionability checks time out. A direct .click() bypasses
+  // hit-testing and is what the reverse-engineered flow uses.
+  const clicked = await page
+    .evaluate((label) => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const target = btns.find((b) => (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase() === label.toLowerCase());
+      if (!target) return false;
+      target.click();
+      return true;
+    }, action.text || action.aria)
+    .catch(() => false);
+  if (!clicked) {
+    fail('could not dispatch click on "' + (action.text || action.aria) + '"');
+  }
+  verbose('clicked "' + (action.text || action.aria) + '" (raw dispatch)');
+
+  // TikTok may show a confirmation modal ("Continue posting? We're still
+  // checking the video..."). Confirm it so the publish actually proceeds.
+
+  // TikTok may show a confirmation modal ("Continue posting? We're still
+  // checking the video..."). Confirm it so the publish actually proceeds.
+  await confirmPostModal(page);
+
+  const startUrl = page.url();
   const outcome = await Promise.race([
     rpcPromise.then(async (res) => {
       const body = await parseRpcBody(res);
       const ids = extractIds(body);
-      return Object.assign({ status: saveDraft ? 'draft' : 'published', url: null }, ids, { ok: true });
+      verbose('publish rpc [' + res.status() + '] ids=' + JSON.stringify(ids));
+      return Object.assign({ status: saveDraft ? 'draft' : 'published', url: null, via: 'rpc' }, ids, { ok: true });
     }),
     new Promise((resolve) => {
-      const timer = setInterval(() => {
-        const url = page.url();
-        const m = /\/video\/(\d+)/.exec(url);
-        if (/\/tiktokstudio\/content/.test(url)) {
-          clearInterval(timer);
-          resolve({ status: saveDraft ? 'draft' : 'published', itemId: null, projectId: null, url: url, ok: true });
-        } else if (m) {
-          clearInterval(timer);
-          resolve({ status: 'published', itemId: m[1], projectId: null, url: url, ok: true });
-        }
-      }, 500);
+      // URL / DOM signals -- some flows never replay the RPC within our window.
+      const timer = setInterval(async () => {
+        try {
+          const url = page.url();
+          const m = /\/video\/(\d+)/.exec(url);
+          if (/\/tiktokstudio\/content/.test(url) && url !== startUrl) {
+            clearInterval(timer);
+            resolve({ status: saveDraft ? 'draft' : 'published', itemId: null, projectId: null, url, ok: true, via: 'redirect' });
+            return;
+          }
+          if (m) {
+            clearInterval(timer);
+            resolve({ status: 'published', itemId: m[1], projectId: null, url, ok: true, via: 'redirect' });
+            return;
+          }
+          const sig = await page
+            .evaluate(() => {
+              const text = document.body ? document.body.innerText.slice(0, 3000) : '';
+              const success = /(your video (has been|is) (uploaded|published)|successfully (uploaded|published)|has been uploaded|video uploaded|manage posts|back to tiktok studio)/i.test(text);
+              const fail = /(upload failed|failed to upload|something went wrong|please try again)/i.test(text);
+              return { success, fail, snippet: text.replace(/\s+/g, ' ').slice(0, 200) };
+            })
+            .catch(() => null);
+          if (sig && sig.fail) {
+            clearInterval(timer);
+            resolve({ status: 'failed', ok: false, error: 'TikTok reported an upload failure: "' + sig.snippet + '"', via: 'dom' });
+          } else if (sig && sig.success) {
+            clearInterval(timer);
+            resolve({ status: saveDraft ? 'draft' : 'published', itemId: null, projectId: null, url: page.url(), ok: true, via: 'dom' });
+          }
+        } catch (err) { /* page navigating -- keep polling */ }
+      }, 1000);
     }),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('Timed out waiting for TikTok to confirm the post.')), 60e3)),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('__CONFIRM_TIMEOUT__')), 120e3)),
   ]);
 
+  if (outcome && outcome.ok === false) {
+    await page.screenshot({ path: '/tmp/captron-reject.png', fullPage: false }).catch(() => {});
+    throw new Error(outcome.error || 'TikTok reported a failure.');
+  }
   return outcome;
+}
+
+/**
+ * TikTok sometimes shows a confirmation modal after the first "Post" click
+ * ("Continue with posting? We're still checking the video..."). The publish
+ * only proceeds after clicking the modal's confirm button (e.g. "Nu plaatsen",
+ * "Post now", "Publier maintenant"). This polls for the modal and clicks it.
+ * Returns true when the modal was confirmed.
+ */
+async function confirmPostModal(page, { waitMs = 30000 } = {}) {
+  const cancelRe = /cancel|annuleren|annuler|cancelar|abbrechen|取消|キャンセル|취소/i;
+  const confirmRe = /post now|nu plaatsen|publi|plaats|publish|trotzdem|veröffentlich|publicar|de todos modos|continue|doorgaan|confirm|posted/i;
+  const start = Date.now();
+  while (Date.now() - start < waitMs) {
+    const btnTexts = await page
+      .evaluate(() => {
+        const roots = Array.from(document.querySelectorAll('[role="dialog"], [data-testid*="modal" i], [class*="modal" i], [class*="dialog" i]'));
+        const bs = [];
+        if (roots.length) {
+          for (const r of roots) for (const b of r.querySelectorAll('button')) bs.push((b.innerText || b.getAttribute('aria-label') || '').trim());
+        } else {
+          for (const b of document.querySelectorAll('button')) bs.push((b.innerText || b.getAttribute('aria-label') || '').trim());
+        }
+        return bs.filter(Boolean);
+      })
+      .catch(() => []);
+
+    const nonCancel = btnTexts.filter((t) => !cancelRe.test(t) && confirmRe.test(t));
+    if (nonCancel.length) {
+      const clicked = await page
+        .evaluate((confirmLabel) => {
+          const cancelRe2 = /cancel|annuleren|annuler|cancelar|abbrechen|取消|キャンセル|취소/i;
+          const candidates = Array.from(document.querySelectorAll('[role="dialog"] button, [class*="modal" i] button, [class*="dialog" i] button'));
+          const pool = candidates.length ? candidates : Array.from(document.querySelectorAll('button'));
+          const target = pool.find((b) => {
+            const t = (b.innerText || b.getAttribute('aria-label') || '').trim();
+            return t.toLowerCase() === confirmLabel.toLowerCase() && !cancelRe2.test(t);
+          });
+          if (!target) return false;
+          target.click();
+          return true;
+        }, nonCancel[0])
+        .catch(() => false);
+      if (clicked) {
+        verbose('confirmed post via modal button "' + nonCancel[0] + '"');
+        return true;
+      }
+    }
+    await sleep(800);
+  }
+  return false;
+}
+/** Wrap confirmation timeouts with the recorded API log for diagnosis. */
+async function finalizePostWithDiagnostics(page, opts) {
+  try {
+    return await finalizePost(page, opts);
+  } catch (err) {
+    if (err && /__CONFIRM_TIMEOUT__/.test(err.message)) {
+      await page.screenshot({ path: '/tmp/captron-confirm-timeout.png', fullPage: false }).catch(() => {});
+      const seen = (page._apiLog || []).slice(-12).join('\n  ');
+      throw new Error(
+        'Timed out waiting for TikTok to confirm the post (120s).\n' +
+        'Last TikTok API calls:\n  ' + (seen || '(none recorded)') +
+        '\nScreenshot: /tmp/captron-confirm-timeout.png. ' +
+        'If the post actually went live (check `captron content`), this is cosmetic — please report it.'
+      );
+    }
+    throw err;
+  }
 }
 
 /** Try to open the schedule picker. Returns true when the picker opened. */
@@ -282,12 +490,30 @@ async function configureSchedule(page, date) {
  */
 async function performPost({ context, videoPath, caption, schedule, visibility, saveDraft = false, onProgress } = {}) {
   const page = await context.newPage();
+  installApiLog(page);
   try {
     await gotoUpload(context, page);
+    await waitForFileInput(page);
     step('Uploading ' + path.basename(videoPath) + ' ...');
     await page.setInputFiles(SELECTORS.fileInput, videoPath);
 
-    await waitForEditor(page, { uploadTimeoutSec: 300, onProgress });
+    // Rare: React hydration can drop the first setInputFiles. If the editor
+    // never starts, re-arm the input and set the file once more.
+    try {
+      await waitForEditor(page, { uploadTimeoutSec: 300, onProgress });
+    } catch (err) {
+      const alive = await page
+        .evaluate(() => !!document.querySelector('input[type="file"]'))
+        .catch(() => false);
+      if (alive && !/rejected/i.test(err.message || '')) {
+        warn('Editor did not start — retrying the file input once.');
+        await page.setInputFiles(SELECTORS.fileInput, videoPath).catch(() => {});
+        await waitForEditor(page, { uploadTimeoutSec: 300, onProgress });
+      } else {
+        throw err;
+      }
+    }
+    await clearTour(page); // the tour often starts right after the editor mounts
     ok('Video uploaded — editor ready');
 
     if (caption) {
@@ -308,7 +534,7 @@ async function performPost({ context, videoPath, caption, schedule, visibility, 
       }
     }
 
-    const final = await finalizePost(page, { saveDraft });
+    const final = await finalizePostWithDiagnostics(page, { saveDraft });
     const handle = await resolveHandle(page).catch(() => null);
 
     return {

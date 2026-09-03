@@ -6,22 +6,26 @@ const { launchProfile } = require('./browser');
 const { performPost, handlePostError, NotLoggedInError } = require('./upload');
 const { buildCaption, parseSchedule, formatDate, warn, info, ok, fail, printResult, sleep } = require('./utils');
 
-/** Parse a manifest file (JSON array or CSV) into post specs. */
+/** Parse a manifest file (JSON array, {items:[...]}, single object, or CSV). */
 function parseManifest(file) {
   const resolved = path.resolve(file);
   const content = fs.readFileSync(resolved, 'utf8');
   let specs;
-  if (/\.(csv)$/i.test(file)) {
+  if (/\.csv$/i.test(file)) {
     specs = parseCsv(content);
   } else {
+    let parsed;
     try {
-      specs = JSON.parse(content);
+      parsed = JSON.parse(content);
     } catch (err) {
       throw new Error('manifest is not valid JSON: ' + err.message);
     }
+    if (Array.isArray(parsed)) specs = parsed;
+    else if (parsed && Array.isArray(parsed.items)) specs = parsed.items;
+    else if (parsed && typeof parsed === 'object') specs = [parsed];
+    else throw new Error('manifest must be an array of post specs, {items:[...]}, or a single spec object');
   }
-  if (!Array.isArray(specs)) throw new Error('manifest must be a JSON array of post specs');
-  return specs.map((s, i) => ({ index: i, video: s.video || s.file || s.path, caption: s.caption, hashtags: s.hashtags, schedule: s.schedule, visibility: s.visibility, account: s.account || null, draft: s.draft || null }));
+  return specs.map((s, i) => ({ index: i, video: s.video || s.file || s.path, caption: s.caption, hashtags: s.hashtags, schedule: s.schedule, visibility: s.visibility, account: s.account || null, draft: s.draft === true || s.draft === 'true' || s.draft === 'draft' }));
 }
 
 function parseCsv(content) {
@@ -47,7 +51,8 @@ function buildPlan(specs, { defaultAccount, defaultDraft }) {
       video: s.video,
       caption: buildCaption({ caption: s.caption, hashtags: s.hashtags }),
       schedule: s.schedule,
-      scheduleDate: formatDate(scheduleDate),
+      scheduleDate, // actual Date (used to post)
+      scheduleLabel: formatDate(scheduleDate), // display only
       visibility: s.visibility || 'everyone',
       account: s.account || defaultAccount,
       draft: s.draft === true ? true : defaultDraft,
@@ -101,7 +106,7 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
           context: contexts[acct],
           videoPath: path.resolve(spec.video),
           caption: spec.caption,
-          schedule: spec.scheduleDate ? new Date(spec.scheduleDate) : null,
+          schedule: spec.scheduleDate, // real Date
           visibility: spec.visibility,
           saveDraft: Boolean(spec.draft),
         });

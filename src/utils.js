@@ -190,6 +190,21 @@ function humanize(seconds) {
   return m + 'm ' + s + 's';
 }
 
+/**
+ * Format bytes as a human readable string ("7.2 MB").
+ */
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '?';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return (i === 0 ? Math.round(v) : Math.round(v * 10) / 10) + ' ' + units[i];
+}
+
 /** Sleep helper. */
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -250,6 +265,7 @@ module.exports = {
   parseSchedule,
   formatDate,
   humanize,
+  formatBytes,
   sleep,
   withTimeout,
   fileExists,

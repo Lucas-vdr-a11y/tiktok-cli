@@ -96,10 +96,23 @@ async function findButtonByLabel(page, labels) {
   );
 }
 
-/** Guess the current account handle from the studio chrome. */
+/** Guess the current account handle from the studio chrome (not video cards). */
 async function resolveHandle(page) {
   const handle = await page
-    .$eval(SELECTORS.handleLink, (a) => a.getAttribute('href'))
+    .evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a[href^="/@"]'));
+      const chrome = links.find((a) => !/\/video\//.test(a.getAttribute('href') || ''));
+      if (chrome) {
+        const m = /^\/@([^/?]+)/.exec(chrome.getAttribute('href') || '');
+        if (m) return m[1];
+      }
+      const any = links.find((a) => /\/video\//.test(a.getAttribute('href') || ''));
+      if (any) {
+        const m = /^\/@([^/?]+)\/video\//.exec(any.getAttribute('href') || '');
+        if (m) return m[1];
+      }
+      return null;
+    })
     .catch(() => null);
   return handle || null;
 }
