@@ -3,6 +3,7 @@
 const path = require('path');
 const { URLS, SELECTORS, VISIBILITY_OPTIONS, findPublishButton, findButtonByLabel, resolveHandle } = require('./selectors');
 const { verbose, warn, fail, step, ok, sleep, isVerbose } = require('./utils');
+const { photoTab } = SELECTORS;
 
 class NotLoggedInError extends Error {
   constructor(message) {
@@ -78,6 +79,37 @@ async function gotoUpload(context, page) {
 }
 
 /**
+ * Switch the upload page to "Photos" mode for a slideshow.
+ * The file input changes to accept images and enables `multiple`.
+ * Returns true when the Photos tab is active.
+ */
+async function switchToPhotos(page) {
+  const urlTab = /tab=photo/.test(page.url());
+  if (!urlTab) {
+    const clicked = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('button'));
+      const tab = tabs.find((b) => {
+        const t = (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase();
+        return /photo/.test(t) && t.length < 20;
+      });
+      if (tab) { tab.click(); return true; }
+      return false;
+    }).catch(() => false);
+    if (!clicked) {
+      await page.goto(URLS.uploadPhoto, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      await sleep(1500);
+    }
+  }
+  await sleep(1500);
+  const isPhotoInput = await page.evaluate(() => {
+    const el = document.querySelector('input[type="file"]');
+    return el && /image\//.test(el.accept || '') && el.multiple;
+  }).catch(() => false);
+  if (!isPhotoInput) throw new Error('Could not switch to Photos/slideshow mode (file input not image/multiple).');
+  return true;
+}
+
+/**
  * Wait until the hidden file input exists AND the surrounding app has settled.
  * React hydration wires the input's change handler late — setting files too
  * early silently does nothing (the page just keeps showing "Select video to
@@ -110,7 +142,6 @@ async function waitForFileInput(page, { timeoutSec = 30 } = {}) {
   throw new Error('The upload page never exposed a file input (not logged in or blocked?). Try `captron login`.');
 }
 
-// ---------------------------------------------------------------------------
 // Editor interactions
 // ---------------------------------------------------------------------------
 
@@ -198,6 +229,93 @@ async function setVisibility(page, visibility) {
   await h2[target.idx].click().catch(() => {});
   await sleep(500);
   return true;
+}
+
+/**
+ * Toggle post interaction switches (Allow comments / Duet / Stitch).
+ * Best-effort: TikTok renders these as checkboxes/switches with localized
+ * labels next to the caption editor. `want` uses true/false/null (null = keep).
+ * Returns { comments, duet, stitch } with true when the switch was set.
+ */
+async function setInteractionFlags(page, { allowComment, allowDuet, allowStitch } = {}) {
+  const out = { comments: false, duet: false, stitch: false };
+  const jobs = [
+    ['comments', allowComment, [/allow comment/i, /commentaar/i, /comentario/i, /commentaire/i, /kommentar/i, /评论/i, /コメント/i, /댓글/i]],
+    ['duet', allowDuet, [/duet/i, /duet/i]],
+    ['stitch', allowStitch, [/stitch/i, /steek/i, /pegar/i, /coller/i, /拼接/i, /スティッチ/i, /스티치/i]],
+  ];
+  for (const [key, want, patterns] of jobs) {
+    if (want == null) continue;
+    try {
+      const done = await page.evaluate(
+        ({ patterns, want }) => {
+          const res = patterns.map((p) => new RegExp(p.source, p.flags));
+          const els = Array.from(document.querySelectorAll('label, span, div'));
+          for (const el of els) {
+            const t = (el.textContent || '').trim();
+            if (!t || t.length > 60) continue;
+            if (!res.some((rx) => rx.test(t))) continue;
+            // the toggle is the nearby checkbox/switch or the label itself
+            const root = el.closest('label') || el.parentElement;
+            const toggle =
+              (root && root.querySelector('input[type="checkbox"], [role="switch"], [role="checkbox"]')) ||
+              el.querySelector('input[type="checkbox"], [role="switch"], [role="checkbox"]') ||
+              (el.matches('input[type="checkbox"]') ? el : null);
+            if (!toggle) continue;
+            const checked = toggle.checked != null ? toggle.checked : toggle.getAttribute('aria-checked') === 'true';
+            if (checked !== Boolean(want)) {
+              (toggle.closest('label') || toggle).click();
+              return 'toggled';
+            }
+            return 'already';
+          }
+          return null;
+        },
+        { patterns: patterns.map((rx) => ({ source: rx.source, flags: rx.flags })), want: Boolean(want) }
+      );
+      if (done) out[key] = true;
+      else verbose(`interaction toggle not found: ${key} (leaving default)`);
+    } catch (err) {
+      verbose(`setInteractionFlags ${key} failed: ${String(err.message).split('\n')[0]}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Best-effort cover-frame selection. Opens the Cover editor (if present),
+ * picks a frame near `seconds`, and confirms.
+ * `seconds` is a timestamp into the video; values <= 0 pick the first frame.
+ * Never throws — returns true when a cover edit was applied.
+ */
+async function setCoverFrame(page, seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return false;
+  const sec = Math.max(0, Number(seconds));
+  try {
+    const opened = await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('button, span, div'));
+      const btn = els.find((el) => /^(edit cover|cover bewerken|editar portada|modifier la couverture|cover bearbeiten|编辑封面|カバーを編集|표지 편집|cover)$/i.test((el.textContent || '').trim()) && el.tagName === 'BUTTON');
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+    if (!opened) { verbose('cover editor not found; keeping auto cover'); return false; }
+    await sleep(1500);
+    await page.evaluate((s) => {
+      const thumbs = Array.from(document.querySelectorAll('img, canvas, video'));
+      const t = thumbs[Math.min(thumbs.length - 1, Math.floor(s))];
+      if (t) t.click();
+    }, sec).catch(() => {});
+    await sleep(600);
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const save = btns.find((b) => /^(save|opslaan|guardar|enregistrer|speichern|保存|保存する|저장|confirm|bevestigen)$/i.test((b.textContent || '').trim()));
+      if (save) save.click();
+    }).catch(() => {});
+    return true;
+  } catch (err) {
+    verbose('setCoverFrame failed: ' + String(err.message).split('\n')[0]);
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -515,20 +633,33 @@ async function configureSchedule(page, date) {
 }
 
 /**
- * Full combined action: upload a video, write the caption, set options and
- * publish (or save as draft) — everything an agent needs in one call.
+ * Full combined action: upload a video (or slideshow of images), write the
+ * caption, set options and publish (or save as draft) — everything an agent
+ * needs in one call.
+ *
+ * `slideshow` (array of image paths) switches the upload page to Photos mode
+ * and uploads up to 10 images as a slideshow. Overrides `videoPath`.
  */
-async function performPost({ context, videoPath, caption, schedule, visibility, saveDraft = false, onProgress } = {}) {
+async function performPost({ context, videoPath, slideshow, caption, schedule, visibility, saveDraft = false, onProgress, allowComment, allowDuet, allowStitch, cover } = {}) {
   const page = await context.newPage();
   installApiLog(page);
   try {
     await gotoUpload(context, page);
-    await waitForFileInput(page);
-    step('Uploading ' + path.basename(videoPath) + ' ...');
-    await page.setInputFiles(SELECTORS.fileInput, videoPath);
+
+    const isSlideshow = Array.isArray(slideshow) && slideshow.length > 0;
+
+    if (isSlideshow) {
+      await switchToPhotos(page);
+      step('Uploading slideshow (' + slideshow.length + ' images) ...');
+      await page.setInputFiles(SELECTORS.fileInput, slideshow);
+    } else {
+      await waitForFileInput(page);
+      step('Uploading ' + path.basename(videoPath) + ' ...');
+      await page.setInputFiles(SELECTORS.fileInput, videoPath);
+    }
 
     // Rare: React hydration can drop the first setInputFiles. If the editor
-    // never starts, re-arm the input and set the file once more.
+    // never starts, re-arm the input and set the file(s) once more.
     try {
       await waitForEditor(page, { uploadTimeoutSec: 300, onProgress });
     } catch (err) {
@@ -537,14 +668,14 @@ async function performPost({ context, videoPath, caption, schedule, visibility, 
         .catch(() => false);
       if (alive && !/rejected/i.test(err.message || '')) {
         warn('Editor did not start — retrying the file input once.');
-        await page.setInputFiles(SELECTORS.fileInput, videoPath).catch(() => {});
+        await page.setInputFiles(SELECTORS.fileInput, isSlideshow ? slideshow : videoPath).catch(() => {});
         await waitForEditor(page, { uploadTimeoutSec: 300, onProgress });
       } else {
         throw err;
       }
     }
     await clearTour(page); // the tour often starts right after the editor mounts
-    ok('Video uploaded — editor ready');
+    ok((isSlideshow ? 'Slideshow uploaded' : 'Video uploaded') + ' — editor ready');
 
     if (caption) {
       await fillCaption(page, caption);
@@ -554,6 +685,15 @@ async function performPost({ context, videoPath, caption, schedule, visibility, 
     if (visibility) {
       await setVisibility(page, visibility);
     }
+
+    if (allowComment != null || allowDuet != null || allowStitch != null) {
+      await setInteractionFlags(page, { allowComment, allowDuet, allowStitch });
+    }
+
+    if (cover != null) {
+      await setCoverFrame(page, Number(cover));
+    }
+
 
     let scheduledAt = null;
     if (schedule) {
@@ -575,6 +715,7 @@ async function performPost({ context, videoPath, caption, schedule, visibility, 
       url: final.url || (handle ? 'https://www.tiktok.com/@' + handle.replace(/^\//, '') + '/video/' + (final.itemId || '') : null),
       handle,
       scheduledAt,
+      slideshow: isSlideshow ? slideshow.length : 0,
     };
   } finally {
     // tidy up extra pages
@@ -597,9 +738,12 @@ function handlePostError(err) {
 module.exports = {
   assertLoggedIn,
   gotoUpload,
+  switchToPhotos,
   waitForEditor,
   fillCaption,
   setVisibility,
+  setInteractionFlags,
+  setCoverFrame,
   openScheduler,
   configureSchedule,
   performPost,
