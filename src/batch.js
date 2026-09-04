@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { launchProfile } = require('./browser');
 const { performPost, handlePostError, NotLoggedInError } = require('./upload');
-const { buildCaption, buildCaptionDetailed, parseSchedule, formatDate, warn, info, ok, fail, printResult, sleep } = require('./utils');
+const { buildCaption, buildCaptionDetailed, parseSchedule, scheduleWarnings, formatDate, warn, info, ok, fail, printResult, sleep } = require('./utils');
 
 /** Parse a manifest file (JSON array, {items:[...]}, single object, or CSV). */
 function parseManifest(file) {
@@ -52,7 +52,7 @@ function buildPlan(specs, { defaultAccount, defaultDraft }) {
       index: s.index,
       video: s.video,
       caption: detailed.text,
-      warnings: detailed.warnings,
+      warnings: [...detailed.warnings, ...scheduleWarnings(scheduleDate)],
       schedule: s.schedule,
       scheduleDate, // actual Date (used to post)
       scheduleLabel: formatDate(scheduleDate), // display only
@@ -115,7 +115,7 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
     if (plan.length !== before) info('Resuming: skipped ' + (before - plan.length) + ' already-posted items.');
   }
   if (dryRun) {
-    const table = plan.map((p) => ({ video: p.video, caption: p.caption, schedule: p.schedule, account: p.account, draft: p.draft }));
+    const table = plan.map((p) => ({ video: p.video, caption: p.caption, schedule: p.schedule, account: p.account, draft: p.draft, warnings: p.warnings }));
     return { ok: true, dryRun: true, total: table.length, results: table };
   }
   info('Batch: ' + plan.length + ' posts (' + (defaultDraft ? 'DRAFT MODE' : 'LIVE PUBLISH') + ')');

@@ -31,9 +31,10 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron sync [account] --days 7 --limit 20 --comments 5 --out sync.json` — posts + analytics + comments in ONE browser session (daily digest)
 - `captron calendar --days 14` — scheduled queue grouped by day
 - `captron caption --hook "..." -t ai,fyp --strict` — offline caption builder
-- `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts in one call
-- `captron audit --limit 20` — totals, averages, top/flop posts, caption gaps
+- `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts in one call (now includes viewer-activity metrics)
+- `captron best-time --days 28` — best posting slots from viewer activity
 - `captron hook --niche <ai|money|fitness|story|tech> --count 5 --seed x` — offline viral hooks (deterministic)
+- `captron audit --limit 20` — totals, averages, top/flop posts, caption gaps
 - `captron download [postId] -o out.mp4` — single video; `--all --limit 10 --out-dir ./clips --query <text>` for bulk
 - `captron delete <postId> --yes` — delete a published post (safety catch)
 - `captron drafts` — list drafts; `--publish <id>` / `--delete <id>`
@@ -41,14 +42,15 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron hashtags <tag>` — hashtag detail + related tags
 - `captron comments --limit 20` — recent comments (best-effort)
 - `captron batch <manifest> [--delay 20 --jitter 8 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many (JSON/CSV)
-- `captron config [key] [value]` — get/set config; `captron new <series>` scaffolds a manifest
-- `captron doctor [--fix]` — environment check; `--fix` clears stale Chromium locks
+- `captron config [key] [value]` — get/set config; `captron new <series> [--niche money --seed x]` scaffolds a manifest (hooks as captions with --niche)
+- `captron clean [--dry-run]` — free disk: prune Chromium caches (sessions kept)
+- `captron doctor [--fix]` — environment check (now with profile sizes); `--fix` clears stale Chromium locks
 
 ## Key options for `post`
 
 - `-c, --caption <text>` or `--desc-file <path>` (long AI captions)
 - `-t, --hashtags <tags>` — comma-separated, no `#` needed, deduped
-- `-s, --schedule <when>` — `"YYYY-MM-DD HH:mm"` | `"18:30"` | `"today 18:00"` | `"tomorrow 09:00"` | `"friday 18:00"` | `"+90m"` | `"+3d"` | `"in 2 hours"`
+- `-s, --schedule <when>` — `"YYYY-MM-DD HH:mm"` | `"18:30"` | `"today 18:00"` | `"tomorrow 09:00"` | `"friday 18:00"` | `"+90m"` | `"+3d"` | `"in 2 hours"` (Studio needs ~20 min lead, ~10 days max — out-of-window warns)
 - `-v, --visibility <who>` — `everyone` | `friends` | `private`
 - `-d, --draft` — save as draft instead of publishing
 - `--slideshow <paths>` — comma-separated image paths (up to 10) for a slideshow; overrides `<video>`

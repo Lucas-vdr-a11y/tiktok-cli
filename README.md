@@ -45,12 +45,14 @@ captron content          # lists posts + drafts
 | `post <video> --slideshow <paths>` | Upload a slideshow of images (comma-separated, up to 10). |
 | `probe <file>` | Offline TikTok-readiness check (size, codec, duration, verdict). |
 | `fit <input> -o <out>` | Normalize to vertical 1080x1920 H.264/AAC via ffmpeg (offline). |
+| `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--export posts.csv`. |
 | `download [postId]` | Download one of your published videos (default: most recent). `--all --limit 10 --out-dir ./clips` for bulk. |
 | `content [account]` | Posts + drafts in one call. |
 | `sync [account]` | One-session digest: posts + analytics + comments snapshot (`--days 7 --limit 20 --comments 5 --out sync.json`). Replaces 3 browser launches with 1. |
 | `calendar [account]` | Scheduled queue grouped by day (`--days 14`). |
 | `caption` | Offline caption builder (`--hook "..." --cta "..." -t tags --strict`). |
-| `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`, CSV via `--export out.csv`). |
+| `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`, CSV via `--export out.csv`, viewer-activity via `best-time`). |
+| `best-time [account]` | Best posting slots from viewer activity (`--days 28`). |
 | `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. |
 | `hook` | Offline viral hook generator (`--niche ai|money|fitness|story|tech --count 5 --seed x`). |
 | `drafts [account]` | List drafts; `--publish <id>` / `--delete <id>`. |
@@ -60,9 +62,10 @@ captron content          # lists posts + drafts
 | `comments [account]` | Recent comments on your posts (best-effort). |
 | `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--strict` fails warned items. |
 | `config [key] [value]` | Get/set config (no args lists all). |
-| `new <name>` | Scaffold a `<name>.manifest.json` series template. |
+| `new <name>` | Scaffold a `<name>.manifest.json` series template (`--count 5 --niche money --seed x` fills hook captions). |
+| `clean [--dry-run]` | Free disk: prune disposable Chromium caches (sessions kept). |
 | `completion` | Print bash/zsh completion (`eval "$(captron completion)"`). |
-| `doctor [--fix]` | Check environment, browser, ffmpeg, disk, profiles, session. `--fix` clears stale Chromium locks. |
+| `doctor [--fix]` | Check environment, browser, ffmpeg, disk, profile sizes, session. `--fix` clears stale Chromium locks. |
 
 ### `post` options
 
@@ -83,11 +86,11 @@ captron content          # lists posts + drafts
 --dry-run                  Validate inputs without posting
 --headless                 Run browser headless (or CAPTRON_HEADLESS=1)
 --json                     Machine-readable output (or CAPTRON_JSON=1)
--a, --account <name>       Account profile to use (or CAPTRON_ACCOUNT)
-```
-
 `post` auto-runs `probe` on the video first (duration/codec warnings are
 advisory unless `--strict`).
+
+Scheduling window: TikTok Studio needs ~20 min lead and allows ~10 days
+max — out-of-window schedules warn (and fail under `--strict`).
 
 ### Media prep (offline, before posting)
 

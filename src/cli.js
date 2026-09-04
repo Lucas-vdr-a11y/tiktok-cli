@@ -80,9 +80,11 @@ async function runPost(videoArg, opts) {
     utils.fail('--schedule must be in the future (' + scheduleDate.toISOString() + ').');
     process.exit(1);
   }
+  const schedWarns = utils.scheduleWarnings(scheduleDate);
+  for (const w of schedWarns) utils.warn(w);
   const { text: caption, warnings } = buildCaptionDetailed({ caption: captionOpt, hashtags: opts.hashtags });
   for (const w of warnings) utils.warn(w);
-  const strictWarnings = [...warnings, ...((!isSlideshow && vcheck && vcheck.warning) ? [vcheck.warning] : []), ...((!isSlideshow && vcheck && vcheck.probe && vcheck.probe.warnings) ? vcheck.probe.warnings : [])];
+  const strictWarnings = [...warnings, ...schedWarns, ...((!isSlideshow && vcheck && vcheck.warning) ? [vcheck.warning] : []), ...((!isSlideshow && vcheck && vcheck.probe && vcheck.probe.warnings) ? vcheck.probe.warnings : [])];
   if (opts.strict && strictWarnings.length) {
     utils.fail('Strict mode: ' + strictWarnings.join('; '));
     process.exit(1);
@@ -406,7 +408,7 @@ function buildProgram() {
       printResult(res, (r) => {
         if (r.dryRun) {
           const lines = ['Dry run — ' + r.total + ' posts planned:'];
-          for (const t of r.results) lines.push('  ' + t.video + '  -> @' + t.account + (t.schedule ? ' @ ' + t.schedule : '') + (t.draft ? ' [draft]' : ' [live]'));
+          for (const t of r.results) lines.push('  ' + t.video + '  -> @' + t.account + (t.schedule ? ' @ ' + t.schedule : '') + (t.draft ? ' [draft]' : ' [live]') + (t.warnings && t.warnings.length ? '  (! ' + t.warnings.join('; ') + ')' : ''));
           return lines.join('\n');
         }
         const okCount = r.okCount || 0;
@@ -486,6 +488,32 @@ function buildProgram() {
       const out = { ok: true, account: res.account, handle: res.handle, scanned: items.length, totals: { views: sum('views'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares') }, averages: { views: avg('views'), likes: avg('likes') }, top: top.map((t) => t.id), flops: flops.map((t) => t.id), noCaption: noCaption.length };
       printResult(out, (r) => {
         const lines = ['Audit @' + (r.handle || r.account) + ' (' + r.scanned + ' posts):', '  totals:   ' + r.totals.views + ' views · ' + r.totals.likes + ' likes · ' + r.totals.comments + ' comments', '  averages: ' + r.averages.views + ' views/post', '  top:      ' + (r.top.join(', ') || '—'), '  flops:    ' + (r.flops.join(', ') || '—') + (r.noCaption ? '   (' + r.noCaption + ' posts have no caption!)' : '')];
+        return lines.join('\n');
+      });
+    });
+
+  program
+    .command('best-time [account]')
+    .description('Best posting slots from viewer-activity analytics (best-effort).')
+    .option('-d, --days <n>', 'range: 1, 7, 28 or 60 days', '28')
+    .action(async (account, opts) => {
+      applyGlobals();
+      const { analytics, summarizeBestTimes } = require('./analytics');
+      const res = await analytics({ account: account || globalOptions.account || 'main', days: Number(opts.days), headless: globalOptions.headless });
+      if (!res.ok) { printResult(res, (r) => 'Best-time failed: ' + r.error); process.exit(1); }
+      const best = summarizeBestTimes(res.metrics);
+      printResult({ ok: true, account: res.account, handle: res.handle, range_days: res.range_days, ...best }, (r) => {
+        const lines = ['Best time @' + (r.handle || r.account || '?') + ' (last ' + r.range_days + 'd):'];
+        if (r.hours.length) {
+          lines.push('  peak hours:');
+          for (const h of r.hours) lines.push('    ' + h.date + '  (score ' + h.value + ')');
+        }
+        if (r.days.length) {
+          lines.push('  active days:');
+          for (const d of r.days) lines.push('    ' + d.date + '  (score ' + d.value + ')');
+        }
+        if (r.suggestion) lines.push('  → ' + r.suggestion);
+        else lines.push('  (no viewer-activity data yet — post first, then check back)');
         return lines.join('\n');
       });
     });
@@ -573,14 +601,28 @@ function buildProgram() {
     .command('new <name>')
     .description('Scaffold a batch manifest + caption file for a new series.')
     .option('--count <n>', 'number of episode stubs', '5')
+    .option('--niche <name>', 'fill captions with generated hooks (ai|money|fitness|story|tech)', null)
+    .option('--seed <s>', 'seed for --niche hooks', 'captron')
     .action((name, opts) => {
       applyGlobals();
       const fs = require('fs');
       const n = Math.max(1, Math.min(Number(opts.count) || 5, 50));
+      let hooks = [];
+      if (opts.niche) {
+        try {
+          hooks = require('./hooks').generateHooks({ niche: opts.niche, count: n, seed: opts.seed || name });
+        } catch (_) { hooks = []; }
+      }
       const items = [];
-      for (let i = 1; i <= n; i++) items.push({ video: './ep' + i + '.mp4', caption: name + ' — part ' + i, hashtags: 'series,faceless,fyp', visibility: 'everyone' });
+      for (let i = 1; i <= n; i++) {
+        const hook = hooks[i - 1];
+        items.push(hook
+          ? { video: './ep' + i + '.mp4', caption: hook.hook, hashtags: 'series,faceless,fyp', visibility: 'everyone' }
+          : { video: './ep' + i + '.mp4', caption: name + ' — part ' + i, hashtags: 'series,faceless,fyp', visibility: 'everyone' });
+      }
       const file = name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase() + '.manifest.json';
-      printResult({ ok: true, file, count: n }, (r) => 'Wrote ' + r.file + ' (' + r.count + ' episodes). Edit captions, then `captron batch ' + r.file + ' --dry-run`.');
+      fs.writeFileSync(file, JSON.stringify(items, null, 2));
+      printResult({ ok: true, file, count: n, niche: opts.niche || null }, (r) => 'Wrote ' + r.file + ' (' + r.count + ' episodes' + (r.niche ? ', niche ' + r.niche : '') + '). Edit captions, then `captron batch ' + r.file + ' --dry-run`.');
     });
 
   program
@@ -590,7 +632,7 @@ function buildProgram() {
       const script = [
         '# captron completion (bash + zsh)',
         '# usage: eval "$(captron completion)"',
-        '_captron_cmds="login logout whoami accounts post probe fit posts content sync calendar caption analytics audit hook download drafts batch delete trending hashtags comments config new doctor completion"',
+        '_captron_cmds="login logout whoami accounts post probe fit posts content sync calendar caption analytics best-time audit hook download drafts batch delete trending hashtags comments config new clean doctor completion"',
         'if [ -n "$BASH_VERSION" ]; then',
         '  _captron() { local cur="${COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "$_captron_cmds" -- "$cur")); }',
         '  complete -F _captron captron',
@@ -690,6 +732,10 @@ function buildProgram() {
         if (st) info.disk = utils.formatBytes(Number(st.bavail) * Number(st.bsize)) + ' free';
       } catch (_) {}
       try {
+        const { profileSizes } = require('./maintain');
+        info.sizes = profileSizes();
+      } catch (_) { info.sizes = []; }
+      try {
         const context = await browserMod.launchProfile({ account: globalOptions.account || 'main', headless: true });
         info.loggedIn = await auth.isLoggedIn(context);
         await context.close();
@@ -705,9 +751,26 @@ function buildProgram() {
         lines.push('  ffmpeg:       ' + r.ffmpeg);
         if (r.disk) lines.push('  disk:        ' + r.disk);
         lines.push('  profiles:     ' + (r.profiles.length ? r.profiles.map((p) => p.name).join(', ') : '(none yet — run `captron login`)'));
+        if (r.sizes && r.sizes.length) lines.push('  sizes:        ' + r.sizes.map((s) => s.name + ' ' + s.human).join(', ') + '  (free with `captron clean`)');
         lines.push('  logged in:    ' + (r.loggedIn ? 'yes' : 'NO'));
         if (r.sessionError) lines.push('  session err:  ' + r.sessionError);
         lines.push('  env:          ' + Object.entries(r.env).map(([k, v]) => k + '=' + (v || '—')).join(' '));
+        return lines.join('\n');
+      });
+    });
+
+  program
+    .command('clean')
+    .description('Free disk: prune disposable Chromium caches in profiles (sessions kept).')
+    .option('--dry-run', 'report only, delete nothing')
+    .action((opts) => {
+      applyGlobals();
+      const { cleanCaches } = require('./maintain');
+      const res = cleanCaches({ dryRun: Boolean(opts.dryRun) });
+      printResult(res, (r) => {
+        const lines = [(r.dryRun ? 'Would free ' : 'Freed ') + r.freedHuman + ' (' + r.removed.length + ' dirs):'];
+        for (const x of r.removed.slice(0, 20)) lines.push('  ' + x.profile + '/' + x.dir + '  ' + utils.formatBytes(x.bytes));
+        if (r.removed.length > 20) lines.push('  … +' + (r.removed.length - 20) + ' more');
         return lines.join('\n');
       });
     });

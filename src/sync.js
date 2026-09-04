@@ -8,7 +8,6 @@ const { resolveHandleFromPage } = require('./content');
 const { fetchItemPage, normalizeItem } = require('./posts');
 const { fetchInsights, METRICS, RESPONSE_KEYS, parseSeries } = require('./analytics');
 const { openInbox, scrapeCommentRows, normalizeComment } = require('./comments');
-
 const OVERVIEW = [
   ['views', METRICS.views],
   ['profile_views', METRICS.profile_views],
@@ -18,6 +17,8 @@ const OVERVIEW = [
   ['followers', METRICS.followers],
   ['new_viewers', METRICS.new_viewers],
   ['total_viewers', METRICS.total_viewers],
+  ['active_days', METRICS.active_days],
+  ['active_hours', METRICS.active_hours],
 ];
 
 /**

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 — 2026-09-04
+
+Care + timing wave (83 tests pass).
+
+- `clean [--dry-run]` — prune disposable Chromium caches across profiles
+  (cookies/sessions kept; ~190 MB reclaimable on a lived-in profile).
+  `doctor` now prints per-profile sizes with a `clean` hint.
+- `best-time [--days 28]` — posting slots from viewer-activity metrics.
+  `analytics`/`sync` now also fetch active_days/active_hours; pure
+  `summarizeBestTimes` ranks the peaks (best-effort, shapes vary).
+- Schedule window warnings: ~20 min lead, ~10 days max. Warn in
+  `post`, `batch` plan + dry-run output, and fail under `--strict`.
+- `new --niche <name> --seed <s>` — fill series manifests with
+  generated hooks instead of "part N" stubs.
+
 ## 0.6.0 — 2026-09-04
 
 One-session sync wave (77 tests pass).

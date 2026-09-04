@@ -263,6 +263,21 @@ function formatDate(d) {
   return d.toISOString();
 }
 
+/**
+ * Warn when a scheduled date falls outside TikTok Studio's scheduling
+ * window (needs ~20 min lead; at most ~10 days ahead, 2026-09).
+ * Pure — returns string warnings (empty when fine or no date).
+ */
+function scheduleWarnings(date, now = new Date()) {
+  if (!date) return [];
+  const ms = date.getTime() - now.getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return [];
+  const out = [];
+  if (ms < 20 * 60e3) out.push('scheduled only ' + Math.max(1, Math.round(ms / 60e3)) + ' min ahead; TikTok needs ~20 min lead — it may post immediately or fail');
+  if (ms > 10 * 86400e3) out.push('scheduled ' + Math.round(ms / 86400e3) + ' days ahead; TikTok Studio allows ~10 days max — it may refuse');
+  return out;
+}
+
 /** Humanize seconds. */
 function humanize(seconds) {
   if (seconds < 60) return Math.round(seconds) + 's';
@@ -421,6 +436,7 @@ module.exports = {
   buildCaptionDetailed,
   parseHashtags,
   parseSchedule,
+  scheduleWarnings,
   formatDate,
   humanize,
   formatBytes,

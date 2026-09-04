@@ -147,8 +147,8 @@ function analyticsToCsv(result) {
  */
 async function analytics({ account = 'main', days = 7, posts = 0, headless = false } = {}) {
   const range = VALID_RANGES.includes(Number(days)) ? Number(days) : 7;
-  const overviewTypes = [METRICS.views, METRICS.profile_views, METRICS.likes, METRICS.comments, METRICS.shares, METRICS.followers, METRICS.new_viewers, METRICS.total_viewers];
-  const names = ['views', 'profile_views', 'likes', 'comments', 'shares', 'followers', 'new_viewers', 'total_viewers'];
+  const overviewTypes = [METRICS.views, METRICS.profile_views, METRICS.likes, METRICS.comments, METRICS.shares, METRICS.followers, METRICS.new_viewers, METRICS.total_viewers, METRICS.active_days, METRICS.active_hours];
+  const names = ['views', 'profile_views', 'likes', 'comments', 'shares', 'followers', 'new_viewers', 'total_viewers', 'active_days', 'active_hours'];
   const context = await launchProfile({ account, headless });
   try {
     if (!(await isLoggedIn(context))) return { ok: false, error: 'not logged in', account };
@@ -204,5 +204,24 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
   }
 }
 
-module.exports = { analytics, analyticsToCsv, fetchInsights, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
+/**
+ * Best posting slots from viewer-activity metrics (pure, best-effort).
+ * active_days/active_hours series shapes vary by account — rank entries
+ * generically by value and report the top ones with their labels.
+ * Returns { days[], hours[], suggestion } (empty arrays when no data).
+ */
+function summarizeBestTimes(metrics) {
+  const top = (m, n) => {
+    const series = (m && Array.isArray(m.series) ? m.series : []).filter((p) => p && p.value != null);
+    return [...series].sort((a, b) => Number(b.value) - Number(a.value)).slice(0, n);
+  };
+  const days = top(metrics && metrics.active_days, 3);
+  const hours = top(metrics && metrics.active_hours, 3);
+  let suggestion = null;
+  if (hours.length) suggestion = 'peak viewer activity: ' + hours[0].date + ' (score ' + hours[0].value + ') — schedule ~1h before';
+  else if (days.length) suggestion = 'most active day: ' + days[0].date + ' (score ' + days[0].value + ')';
+  return { days, hours, suggestion };
+}
+
+module.exports = { analytics, analyticsToCsv, fetchInsights, summarizeBestTimes, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
 
