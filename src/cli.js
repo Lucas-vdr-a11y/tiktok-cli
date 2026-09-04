@@ -30,12 +30,28 @@ function applyGlobals() {
 
 async function runPost(videoArg, opts) {
   applyGlobals();
-  const video = videoArg;
 
-  const vcheck = validateVideoPath(video);
-  if (!vcheck.ok) {
-    utils.fail(vcheck.error);
-    process.exit(1);
+  // Slideshow mode: --slideshow takes comma-separated image paths (up to 10).
+  const slideshowPaths = opts.slideshow
+    ? opts.slideshow.split(',').map((p) => p.trim()).filter(Boolean)
+    : [];
+  const isSlideshow = slideshowPaths.length >= 2;
+
+  if (isSlideshow) {
+    // Validate each image path.
+    for (const p of slideshowPaths) {
+      const vcheck = validateVideoPath(p);
+      if (!vcheck.ok) {
+        utils.fail(vcheck.error + ' (slideshow path: ' + p + ')');
+        process.exit(1);
+      }
+    }
+  } else {
+    const vcheck = validateVideoPath(videoArg);
+    if (!vcheck.ok) {
+      utils.fail(vcheck.error);
+      process.exit(1);
+    }
   }
 
   let scheduleDate = parseSchedule(opts.schedule);
@@ -50,7 +66,8 @@ async function runPost(videoArg, opts) {
 
   const caption = buildCaption({ caption: opts.caption, hashtags: opts.hashtags });
 
-  utils.step('Posting "' + vcheck.path + '" (' + utils.formatBytes(vcheck.size) + ') to account "' + globalOptions.account + '"');
+  utils.step('Posting to account "' + globalOptions.account + '"');
+  if (isSlideshow) utils.step('Mode: SLIDESHOW (' + slideshowPaths.length + ' images)');
   if (caption) utils.step('Caption: ' + caption.replace(/\n/g, ' | '));
   if (opts.schedule) utils.step('Scheduled for: ' + formatDate(scheduleDate));
   if (opts.draft) utils.step('Mode: save DRAFT (no publish)');
@@ -61,7 +78,8 @@ async function runPost(videoArg, opts) {
   try {
     result = await uploadLib.performPost({
       context,
-      videoPath: vcheck.path,
+      videoPath: isSlideshow ? null : vcheck.path,
+      slideshow: isSlideshow ? slideshowPaths : undefined,
       caption,
       schedule: scheduleDate,
       visibility: opts.visibility,
@@ -74,23 +92,22 @@ async function runPost(videoArg, opts) {
     await context.close().catch(() => {});
   }
   result.account = globalOptions.account;
-  result.video = vcheck.path;
+  result.video = isSlideshow ? slideshowPaths.join(',') : vcheck.path;
   result.durationSec = Math.round((Date.now() - started) / 1000);
-  printResult(result, (r) =>
-    [
+  printResult(result, (r) => {
+    const lines = [
       '',
       r.ok ? 'Post ' + r.status + ' ✔' : 'Post status: ' + (r.status || 'unknown'),
-      '  video:     ' + r.video,
+      '  ' + (r.slideshow ? 'slideshow (' + r.slideshow + ' images)' : 'video:') + ' ' + r.video,
       '  account:   ' + r.account,
       r.itemId ? '  item id:   ' + r.itemId : '',
       r.projectId ? '  project:   ' + r.projectId : '',
       r.url ? '  url:       ' + r.url : '',
       '  took:      ' + humanize(r.durationSec),
       r.failed ? '  error:     ' + r.error : '',
-    ]
-      .filter(Boolean)
-      .join('\n')
-  );
+    ];
+    return lines.filter(Boolean).join('\n');
+  });
   process.exit(result.failed ? 1 : 0);
 }
 
@@ -159,12 +176,13 @@ function buildProgram() {
 
   program
     .command('post <video>')
-    .description('Upload a video and post it (with caption, hashtags, schedule, visibility) in one action.')
-    .option('-c, --caption <text>', 'video caption text')
+    .description('Upload a video (or slideshow of images) and post it in one action. Use --slideshow for images.')
+    .option('-c, --caption <text>', 'video/image caption text')
     .option('-t, --hashtags <tags>', 'comma-separated hashtags (no # needed)')
     .option('-s, --schedule <when>', 'schedule: "YYYY-MM-DD HH:mm" | "tomorrow HH:mm" | "today HH:mm" | "+2h" | "+3d"')
     .option('-v, --visibility <who>', 'visibility: everyone | friends | private')
     .option('-d, --draft', 'save as draft instead of publishing')
+    .option('--slideshow <paths>', 'comma-separated image paths for a slideshow (up to 10 images, overrides <video>)')
     .action(runPost);
 
   program

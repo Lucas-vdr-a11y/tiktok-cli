@@ -3,6 +3,7 @@
 const path = require('path');
 const { URLS, SELECTORS, VISIBILITY_OPTIONS, findPublishButton, findButtonByLabel, resolveHandle } = require('./selectors');
 const { verbose, warn, fail, step, ok, sleep, isVerbose } = require('./utils');
+const { photoTab } = SELECTORS;
 
 class NotLoggedInError extends Error {
   constructor(message) {
@@ -78,6 +79,37 @@ async function gotoUpload(context, page) {
 }
 
 /**
+ * Switch the upload page to "Photos" mode for a slideshow.
+ * The file input changes to accept images and enables `multiple`.
+ * Returns true when the Photos tab is active.
+ */
+async function switchToPhotos(page) {
+  const urlTab = /tab=photo/.test(page.url());
+  if (!urlTab) {
+    const clicked = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll('button'));
+      const tab = tabs.find((b) => {
+        const t = (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase();
+        return /photo/.test(t) && t.length < 20;
+      });
+      if (tab) { tab.click(); return true; }
+      return false;
+    }).catch(() => false);
+    if (!clicked) {
+      await page.goto(URLS.uploadPhoto, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      await sleep(1500);
+    }
+  }
+  await sleep(1500);
+  const isPhotoInput = await page.evaluate(() => {
+    const el = document.querySelector('input[type="file"]');
+    return el && /image\//.test(el.accept || '') && el.multiple;
+  }).catch(() => false);
+  if (!isPhotoInput) throw new Error('Could not switch to Photos/slideshow mode (file input not image/multiple).');
+  return true;
+}
+
+/**
  * Wait until the hidden file input exists AND the surrounding app has settled.
  * React hydration wires the input's change handler late — setting files too
  * early silently does nothing (the page just keeps showing "Select video to
@@ -110,7 +142,6 @@ async function waitForFileInput(page, { timeoutSec = 30 } = {}) {
   throw new Error('The upload page never exposed a file input (not logged in or blocked?). Try `captron login`.');
 }
 
-// ---------------------------------------------------------------------------
 // Editor interactions
 // ---------------------------------------------------------------------------
 
@@ -515,20 +546,33 @@ async function configureSchedule(page, date) {
 }
 
 /**
- * Full combined action: upload a video, write the caption, set options and
- * publish (or save as draft) — everything an agent needs in one call.
+ * Full combined action: upload a video (or slideshow of images), write the
+ * caption, set options and publish (or save as draft) — everything an agent
+ * needs in one call.
+ *
+ * `slideshow` (array of image paths) switches the upload page to Photos mode
+ * and uploads up to 10 images as a slideshow. Overrides `videoPath`.
  */
-async function performPost({ context, videoPath, caption, schedule, visibility, saveDraft = false, onProgress } = {}) {
+async function performPost({ context, videoPath, slideshow, caption, schedule, visibility, saveDraft = false, onProgress } = {}) {
   const page = await context.newPage();
   installApiLog(page);
   try {
     await gotoUpload(context, page);
-    await waitForFileInput(page);
-    step('Uploading ' + path.basename(videoPath) + ' ...');
-    await page.setInputFiles(SELECTORS.fileInput, videoPath);
+
+    const isSlideshow = Array.isArray(slideshow) && slideshow.length > 0;
+
+    if (isSlideshow) {
+      await switchToPhotos(page);
+      step('Uploading slideshow (' + slideshow.length + ' images) ...');
+      await page.setInputFiles(SELECTORS.fileInput, slideshow);
+    } else {
+      await waitForFileInput(page);
+      step('Uploading ' + path.basename(videoPath) + ' ...');
+      await page.setInputFiles(SELECTORS.fileInput, videoPath);
+    }
 
     // Rare: React hydration can drop the first setInputFiles. If the editor
-    // never starts, re-arm the input and set the file once more.
+    // never starts, re-arm the input and set the file(s) once more.
     try {
       await waitForEditor(page, { uploadTimeoutSec: 300, onProgress });
     } catch (err) {
@@ -537,14 +581,14 @@ async function performPost({ context, videoPath, caption, schedule, visibility, 
         .catch(() => false);
       if (alive && !/rejected/i.test(err.message || '')) {
         warn('Editor did not start — retrying the file input once.');
-        await page.setInputFiles(SELECTORS.fileInput, videoPath).catch(() => {});
+        await page.setInputFiles(SELECTORS.fileInput, isSlideshow ? slideshow : videoPath).catch(() => {});
         await waitForEditor(page, { uploadTimeoutSec: 300, onProgress });
       } else {
         throw err;
       }
     }
     await clearTour(page); // the tour often starts right after the editor mounts
-    ok('Video uploaded — editor ready');
+    ok((isSlideshow ? 'Slideshow uploaded' : 'Video uploaded') + ' — editor ready');
 
     if (caption) {
       await fillCaption(page, caption);
@@ -575,6 +619,7 @@ async function performPost({ context, videoPath, caption, schedule, visibility, 
       url: final.url || (handle ? 'https://www.tiktok.com/@' + handle.replace(/^\//, '') + '/video/' + (final.itemId || '') : null),
       handle,
       scheduledAt,
+      slideshow: isSlideshow ? slideshow.length : 0,
     };
   } finally {
     // tidy up extra pages
@@ -597,6 +642,7 @@ function handlePostError(err) {
 module.exports = {
   assertLoggedIn,
   gotoUpload,
+  switchToPhotos,
   waitForEditor,
   fillCaption,
   setVisibility,
