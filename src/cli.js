@@ -281,15 +281,28 @@ function buildProgram() {
     .action(async () => {
       applyGlobals();
       const fs = require('fs');
+      const { chromium } = require('playwright');
       const info = {
         node: process.version,
         home: utils.homeDir(),
         profiles: [],
+        browsers: {},
         loggedIn: false,
       };
       try {
         info.profiles = fs.readdirSync(utils.profilesDir()).map((d) => ({ name: d }));
       } catch (err) {}
+      // Detect browser availability without launching a full session.
+      for (const channel of ['chromium', 'chrome']) {
+        try {
+          const b = await chromium.launch({ headless: true, channel: channel === 'chrome' ? 'chrome' : undefined });
+          const v = b.version();
+          await b.close();
+          info.browsers[channel] = 'ok (' + v + ')';
+        } catch (err) {
+          info.browsers[channel] = 'unavailable';
+        }
+      }
       const context = await browserMod.launchProfile({ account: globalOptions.account || 'main', headless: true });
       info.loggedIn = await auth.isLoggedIn(context);
       await context.close();
@@ -297,6 +310,8 @@ function buildProgram() {
         const lines = ['doctor:'];
         lines.push('  node:         ' + r.node);
         lines.push('  captron home: ' + r.home);
+        lines.push('  chromium:     ' + (r.browsers.chromium || '?'));
+        lines.push('  chrome:       ' + (r.browsers.chrome || '?'));
         lines.push('  profiles:     ' + (r.profiles.length ? r.profiles.map((p) => p.name).join(', ') : '(none yet — run `captron login`)'));
         lines.push('  logged in:    ' + (r.loggedIn ? 'yes' : 'NO'));
         return lines.join('\n');

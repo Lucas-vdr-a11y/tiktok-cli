@@ -429,20 +429,41 @@ async function finalizePostWithDiagnostics(page, opts) {
   }
 }
 
-/** Try to open the schedule picker. Returns true when the picker opened. */
+/**
+ * Open the schedule picker by selecting the "Schedule" radio (vs "Now").
+ * Localized labels: Plannen/Schedule/Planificar/Planifier/计划/予約.
+ * Returns true when the schedule panel is now visible.
+ */
 async function openScheduler(page) {
-  const btn = await findButtonByLabel(page, SCHEDULE_LABELS);
-  if (!btn) return false;
-  const handles = await page.$$('button');
-  await handles[btn.idx].click().catch(() => {});
-  await sleep(800);
+  const opened = await page
+    .evaluate(() => {
+      // Prefer clicking the radio input directly (name=postSchedule, value=schedule).
+      const radio = document.querySelector('input[type="radio"][name="postSchedule"][value="schedule"]');
+      if (radio) {
+        radio.click();
+        return 'radio';
+      }
+      // Fallback: click a label/element whose text means "schedule".
+      const labelRe = /^(plannen|schedule|planificar|planifier|planen|计划|予約)$/i;
+      const candidates = Array.from(document.querySelectorAll('label, [role="radio"], button, span, div'));
+      const el = candidates.find((e) => labelRe.test((e.innerText || e.getAttribute('aria-label') || '').trim()));
+      if (el) {
+        el.click();
+        return 'label';
+      }
+      return null;
+    })
+    .catch(() => null);
+  if (!opened) return false;
+  await sleep(1200);
   return true;
 }
 
 /**
- * Best-effort scheduler. The schedule panel varies per locale; when the exact
- * controls cannot be found we warn and fall back to publishing now.
- * Returns true when a schedule was set.
+ * Set a scheduled date/time. The picker exposes two text inputs (YYYY-MM-DD and
+ * HH:MM) once the "Schedule" radio is selected. We set them via the native
+ * value setter so React picks up the change.
+ * Returns true when the values were applied.
  */
 async function configureSchedule(page, date) {
   if (!date) return false;
@@ -451,37 +472,46 @@ async function configureSchedule(page, date) {
     warn('Schedule control not found; posting immediately instead (use --draft to build a queue safely).');
     return false;
   }
-  await sleep(1200);
 
-  const filled = await page
-    .evaluate((iso) => {
-      const inputs = Array.from(document.querySelectorAll('input'));
-      const dateIn = inputs.find((i) => i.type === 'date' || i.type === 'datetime-local');
-      if (dateIn) {
-        dateIn.value = iso.slice(0, 10);
-        dateIn.dispatchEvent(new Event('input', { bubbles: true }));
-        dateIn.dispatchEvent(new Event('change', { bubbles: true }));
-        return 'date';
-      }
-      return null;
-    }, date.toISOString())
-    .catch(() => null);
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const dateStr = `${yyyy}-${mm}-${dd}`;
+  const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 
-  const timeSet = await page
-    .evaluate((hhmm) => {
-      const inputs = Array.from(document.querySelectorAll('input'));
-      const timeIn = inputs.find((i) => i.type === 'time');
-      if (timeIn) {
-        timeIn.value = hhmm;
-        timeIn.dispatchEvent(new Event('input', { bubbles: true }));
-        timeIn.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      }
-      return false;
-    }, (String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0')))
-    .catch(() => false);
+  const result = await page
+    .evaluate(
+      ({ dateStr, timeStr }) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        const inputs = Array.from(document.querySelectorAll('input'));
+        // Date input: text-like, value matches YYYY-MM-DD; time input matches HH:MM.
+        let dateIn = inputs.find((i) => /^\d{4}-\d{2}-\d{2}$/.test(i.value || ''));
+        if (!dateIn) dateIn = inputs.find((i) => /date|datum|fecha/i.test((i.placeholder || '') + (i.getAttribute('aria-label') || '')));
+        let timeIn = inputs.find((i) => /^\d{2}:\d{2}$/.test(i.value || ''));
+        if (!timeIn) timeIn = inputs.find((i) => /time|tiempo|heure|uhr/i.test((i.placeholder || '') + (i.getAttribute('aria-label') || '')));
 
-  return filled === 'date' || timeSet;
+        let setDate = false;
+        let setTime = false;
+        if (dateIn) {
+          setter.call(dateIn, dateStr);
+          dateIn.dispatchEvent(new Event('input', { bubbles: true }));
+          dateIn.dispatchEvent(new Event('change', { bubbles: true }));
+          setDate = /^\d{4}-\d{2}-\d{2}$/.test(dateIn.value);
+        }
+        if (timeIn) {
+          setter.call(timeIn, timeStr);
+          timeIn.dispatchEvent(new Event('input', { bubbles: true }));
+          timeIn.dispatchEvent(new Event('change', { bubbles: true }));
+          setTime = /^\d{2}:\d{2}$/.test(timeIn.value);
+        }
+        return { setDate, setTime, dateVal: dateIn ? dateIn.value : null, timeVal: timeIn ? timeIn.value : null };
+      },
+      { dateStr, timeStr }
+    )
+    .catch(() => ({ setDate: false, setTime: false }));
+
+  if (result.setDate) verbose(`scheduled for ${result.dateVal} ${result.timeVal}`);
+  return result.setDate;
 }
 
 /**
