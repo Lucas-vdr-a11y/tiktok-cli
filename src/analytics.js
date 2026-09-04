@@ -4,6 +4,7 @@ const { launchProfile } = require('./browser');
 const { URLS } = require('./selectors');
 const { verbose, sleep } = require('./utils');
 const { isLoggedIn } = require('./auth');
+const { resolveHandleFromPage } = require('./content');
 
 /**
  * TikTok Studio analytics — reverse engineered.
@@ -148,8 +149,10 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
       const key = RESPONSE_KEYS[type] || 'insight_type_' + type;
       metrics[names[i]] = parseSeries(body[key]);
     });
-    // Handle from studio chrome (same heuristic as content.js)
-    const handle = await page
+    // Handle from studio chrome (same heuristic as content.js).
+    // The analytics tab may not render profile links, so fall back to the
+    // content dashboard in the same session (no extra browser launch).
+    let handle = await page
       .evaluate(() => {
         const links = Array.from(document.querySelectorAll('a[href^="/@"]'));
         const chrome = links.find((a) => !/\/video\//.test(a.getAttribute('href') || ''));
@@ -157,6 +160,15 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
         return m ? m[1] : null;
       })
       .catch(() => null);
+    if (!handle) {
+      try {
+        const contentPage = await context.newPage();
+        await contentPage.goto(URLS.content, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await sleep(2000);
+        handle = await resolveHandleFromPage(contentPage).catch(() => null);
+        await contentPage.close().catch(() => {});
+      } catch (_) { /* keep null */ }
+    }
     const out = { ok: true, account, handle, range_days: range, metrics };
     if (Number(posts) > 0) {
       const { fetchItemPage, normalizeItem } = require('./posts');
