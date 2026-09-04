@@ -41,6 +41,8 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron trending --limit 20` — trending hashtags (caption research)
 - `captron hashtags <tag>` — hashtag detail + related tags
 - `captron batch <manifest> [--delay 20 --jitter 8 --probe --auto-fit --retries 2 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many; `--probe` pre-flights, `--auto-fit` normalizes, `--retries` retries each item; per-item `"account"` mixes accounts
+- `--jobs <n>` (any `--all` sweep or `post --to/--all` fan-out, any position; or `CAPTRON_JOBS=n`) — run accounts in parallel, results keep order (default 1, sequential)
+- `captron completion [bash|zsh|fish]` — shell completions generated from live commands (`eval "$(captron completion bash)"`)
 - `captron config [key] [value]` — get/set config; `captron new <series> [--niche money --seed x]` scaffolds a manifest (hooks as captions with --niche)
 - `captron clean [--dry-run]` — free disk: prune Chromium caches (sessions kept)
 - `captron update [--check]` — check/install latest from npm (`--check` reports only)

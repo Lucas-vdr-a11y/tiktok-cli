@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0 — 2026-09-04
+
+Speed + shell-polish wave (116 tests pass).
+
+- `--jobs <n>` — parallel fleet runs. Works on every `--all` sweep,
+  `whoami --all`, and `post --to/--all` fan-out, in any flag position
+  (plus `CAPTRON_JOBS=n`). Order-preserving worker pool with per-account
+  error isolation; default 1 = previous sequential behavior. Verified:
+  4 accounts sweep at max-live 4, order kept, one broken profile
+  reports its error without killing the sweep.
+- `completion [bash|zsh|fish]` — rewritten as a runtime generator over
+  the live commander program: new commands/flags complete automatically,
+  per-command flags included, fish support added. `bash -n` and `zsh -n`
+  pass on generated scripts.
+
 ## 0.13.0 — 2026-09-04
 
 Account-management wave (108 tests pass).

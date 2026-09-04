@@ -319,6 +319,32 @@ async function withTimeout(promise, ms, message) {
   }
 }
 
+/**
+ * Run `fn(item, index)` over `items` with at most `jobs` in flight.
+ * Results keep input order. `fn` rejections propagate per item — wrap
+ * `fn` yourself if one bad item must not kill the pool (sweepAccounts
+ * does this). `jobs <= 1` runs strictly sequential (the safe default
+ * for browser-driven flows).
+ */
+async function runPool(items, fn, jobs = 1) {
+  const list = Array.isArray(items) ? items : [];
+  const n = Math.max(1, Math.floor(Number(jobs) || 1));
+  const out = new Array(list.length);
+  if (n <= 1) {
+    for (let i = 0; i < list.length; i++) out[i] = await fn(list[i], i);
+    return out;
+  }
+  let next = 0;
+  const workers = Array.from({ length: Math.min(n, list.length) }, async () => {
+    while (next < list.length) {
+      const i = next++;
+      out[i] = await fn(list[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Filesystem helpers
 // ---------------------------------------------------------------------------
@@ -452,6 +478,7 @@ module.exports = {
   formatBytes,
   sleep,
   withTimeout,
+  runPool,
   retry,
   readJsonFile,
   toCsv,

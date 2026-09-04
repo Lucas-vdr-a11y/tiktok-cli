@@ -58,7 +58,7 @@ captron content          # lists posts + drafts
 | `comments [account]` | Recent comments on your posts (best-effort). `--all` sweeps every account. |
 | `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--probe` pre-flights, `--auto-fit` normalizes, `--retries 2` retries each item, `--strict` fails warned items. Per-item `"account"` mixes accounts. |
 | `clean [--dry-run]` | Free disk: prune disposable Chromium caches (sessions kept). |
-| `completion` | Print bash/zsh completion (`eval "$(captron completion)"`). |
+| `completion [shell]` | Shell completions for bash/zsh/fish, generated from live commands (`eval "$(captron completion bash)"`, `captron completion fish > ~/.config/fish/completions/captron.fish`). |
 | `doctor [--fix] [--offline]` | Check environment, browser, ffmpeg, disk, profile sizes, session + update check. `--fix` clears stale locks; `--offline` skips browsers (fast). |
 | `update [--check]` | Check npm for a newer captron (`--check` reports only). |
 
@@ -181,8 +181,11 @@ captron post ./v.mp4 --all --dry-run      # preview the target list
 Per-item accounts in batch manifests (`"account": "alice"` per row) mix
 different videos across accounts in a single run.
 
-Fleet reads — one command across every profile (sequential, per-account
-results; a broken profile reports its error instead of killing the sweep):
+Fleet reads — one command across every profile (sequential by default,
+per-account results; a broken profile reports its error instead of killing
+the sweep). Add `--jobs <n>` anywhere to run accounts in parallel
+(`captron sync --all --jobs 3`, `CAPTRON_JOBS=3` works too) — results keep
+account order. Posting fans out the same way (`post --to a,b --jobs 2`).
 
 ```bash
 captron whoami --all

@@ -67,13 +67,12 @@ test('cli: use/update/batch-retries/post-auto-fit surface', () => {
 });
 
 test('cli: completion still covers every command', () => {
+  const { execFileSync } = require('node:child_process');
   const { buildProgram } = require('../../src/cli');
   const program = buildProgram();
   const names = program.commands.map((c) => c.name());
-  const src = fs.readFileSync(path.join(__dirname, '../../src/cli.js'), 'utf8');
-  const m = /_captron_cmds="([^"]+)"/.exec(src);
-  assert.ok(m);
+  const out = execFileSync('node', [path.join(__dirname, '../../bin/captron.js'), 'completion', 'bash'], { encoding: 'utf8' });
   for (const n of names) {
-    assert.ok(m[1].split(' ').includes(n), 'completion misses ' + n);
+    assert.ok(out.includes(n), 'completion misses ' + n);
   }
 });

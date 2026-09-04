@@ -9,25 +9,39 @@ const uploadLib = require('./upload');
 const contentLib = require('./content');
 const batchLib = require('./batch');
 
-let globalOptions = { account: null, headless: false };
-
-// ---------------------------------------------------------------------------
-// post command — the flagship combined action
-// ---------------------------------------------------------------------------
+let globalOptions = { account: null, headless: false, jobs: 1 };
 
 /** Module-scoped program ref so top-level handlers can read root options. */
 let programRef = null;
+
+/**
+ * Read `--jobs <n>` wherever it appears on the command line.
+ * Commander only parses global options placed *before* the subcommand
+ * (`captron --jobs 3 sync --all`), but everyone types them after, so
+ * scan argv as a fallback. `--jobs 3` and `--jobs=3` both work.
+ */
+function readJobsFlag(argv, parsed) {
+  if (Number(parsed) > 0) return Math.floor(Number(parsed));
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--jobs' && argv[i + 1] != null) return Math.max(1, Math.floor(Number(argv[i + 1])) || 1);
+    const m = /^--jobs=(\d+)$/.exec(a);
+    if (m) return Math.max(1, parseInt(m[1], 10));
+  }
+  if (Number(process.env.CAPTRON_JOBS) > 0) return Math.max(1, Math.floor(Number(process.env.CAPTRON_JOBS)));
+  return 1;
+}
 
 function applyGlobals() {
   const opts = programRef.opts();
   globalOptions = {
     account: resolveAccount(opts.account),
     headless: opts.headless || /^(1|true|yes)$/i.test(String(process.env.CAPTRON_HEADLESS || '')),
+    jobs: readJobsFlag(process.argv, opts.jobs),
   };
   utils.setVerbose(opts.verbose || process.env.CAPTRON_VERBOSE === '1' || false);
   utils.setJson(opts.json || process.env.CAPTRON_JSON === '1' || false);
 }
-
 async function runPost(videoArg, opts) {
   applyGlobals();
   const fs = require('fs');
@@ -126,9 +140,9 @@ async function runPost(videoArg, opts) {
   }
   const timeoutMs = opts.timeout ? Number(opts.timeout) * 1000 : 0;
   const retries = Math.max(0, Number(opts.retries) || 0);
-  const results = [];
-  for (const acct of targets) {
-    utils.step('Posting to account "' + acct + '"' + (fanout ? ' [' + (results.length + 1) + '/' + targets.length + ']' : ''));
+  const jobs = Math.max(1, Math.floor(Number(globalOptions.jobs) || 1));
+  const postToAccount = async (acct, idx) => {
+    utils.step('Posting to account "' + acct + '"' + (fanout ? ' [' + (idx + 1) + '/' + targets.length + ']' : ''));
     if (isSlideshow) utils.step('Mode: SLIDESHOW (' + slideshowPaths.length + ' images)');
     if (caption) utils.step('Caption: ' + caption.replace(/\n/g, ' | ').slice(0, 160));
     if (opts.schedule) utils.step('Scheduled for: ' + formatDate(scheduleDate));
@@ -160,7 +174,7 @@ async function runPost(videoArg, opts) {
       if (!fanout) {
         await context.close().catch(() => {});
         uploadLib.handlePostError(err);
-        return;
+        return null;
       }
     } finally {
       await context.close().catch(() => {});
@@ -168,7 +182,16 @@ async function runPost(videoArg, opts) {
     result.account = acct;
     result.video = isSlideshow ? slideshowPaths.join(',') : vcheck.path;
     result.durationSec = Math.round((Date.now() - started) / 1000);
-    results.push(result);
+    return result;
+  };
+  let results;
+  if (!fanout) {
+    const single = await postToAccount(targets[0], 0);
+    if (!single) return;
+    results = [single];
+  } else {
+    if (jobs > 1) utils.step('Fan-out parallelism: ' + jobs + ' accounts at a time');
+    results = await utils.runPool(targets, postToAccount, jobs);
   }
   if (!fanout) {
     const result = results[0];
@@ -204,7 +227,6 @@ async function runPost(videoArg, opts) {
 function buildProgram() {
   const program = new Command();
   programRef = program;
-
   program
     .name('captron')
     .description('Post TikTok videos from the command line — built for AI agents & faceless TikTok creators.')
@@ -215,7 +237,8 @@ function buildProgram() {
     .option('-a, --account <name>', 'account profile to use (default: active)')
     .option('--headless', 'run browser headless')
     .option('--json', 'emit machine-readable JSON')
-    .option('-v, --verbose', 'verbose debug output');
+    .option('-v, --verbose', 'verbose debug output')
+    .option('--jobs <n>', 'accounts to run in parallel for --all sweeps and post fan-out (default 1, sequential; also CAPTRON_JOBS)');
 
   program
     .command('login [account]')
@@ -242,7 +265,7 @@ function buildProgram() {
     .action(async (account, opts) => {
       applyGlobals();
       if (opts.all) {
-        const results = await auth.sweepAccounts((name) => auth.logout({ account: name }), { fallback: globalOptions.account || 'main' });
+        const results = await auth.sweepAccounts((name) => auth.logout({ account: name }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         const okCount = results.filter((r) => r.loggedOut).length;
         printResult({ ok: true, okCount, total: results.length, results }, (r) => 'Logged out ' + r.okCount + '/' + r.total + ' ✔');
         return;
@@ -258,7 +281,7 @@ function buildProgram() {
     .action(async (account, opts) => {
       applyGlobals();
       if (opts.all) {
-        const res = await auth.whoamiAll({ headless: globalOptions.headless });
+        const res = await auth.whoamiAll({ headless: globalOptions.headless, jobs: globalOptions.jobs });
         printResult(res, (r) => {
           const lines = ['Accounts (' + r.accounts.length + '):'];
           for (const a of r.accounts) lines.push('  ' + (a.loggedIn ? '✔' : '✖') + ' ' + a.account + (a.handle ? '  @' + a.handle : '') + (a.error ? '  (' + a.error + ')' : ''));
@@ -362,7 +385,7 @@ function buildProgram() {
       const { listPostsApi } = require('./posts');
       if (opts.all) {
         const params = { limit: Number(opts.limit), query: opts.query, sort: opts.sort, scheduledOnly: Boolean(opts.scheduled), since: opts.since, headless: globalOptions.headless };
-        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, ...params }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, ...params }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         if (opts.export) {
           for (const r of swept) {
             if (!r.ok) continue;
@@ -441,7 +464,7 @@ function buildProgram() {
     .action(async (account, opts) => {
       applyGlobals();
       if (opts.all) {
-        const swept = await auth.sweepAccounts((name) => contentLib.listContent({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => contentLib.listContent({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         const okCount = swept.filter((r) => r.ok).length;
         printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept }, (r) => {
           const lines = ['Content sweep (' + r.okCount + '/' + r.total + ' accounts):'];
@@ -487,7 +510,7 @@ function buildProgram() {
       const { analytics, analyticsToCsv } = require('./analytics');
       if (opts.all) {
         const params = { days: Number(opts.days), posts: Number(opts.posts), headless: globalOptions.headless };
-        const swept = await auth.sweepAccounts((name) => analytics({ account: name, ...params }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => analytics({ account: name, ...params }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         if (opts.export) {
           for (const r of swept) {
             if (!r.ok) continue;
@@ -608,7 +631,7 @@ function buildProgram() {
     .action(async (opts) => {
       applyGlobals();
       if (opts.all && !opts.publish && !opts.delete) {
-        const swept = await auth.sweepAccounts((name) => contentLib.listDrafts({ account: name, headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => contentLib.listDrafts({ account: name, headless: globalOptions.headless }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         const okCount = swept.filter((r) => r.ok !== false).length;
         printResult({ ok: true, okCount, total: swept.length, accounts: swept }, (r) => {
           const lines = ['Drafts sweep (' + r.total + ' accounts):'];
@@ -670,7 +693,7 @@ function buildProgram() {
       applyGlobals();
       const { listPostsApi, summarizePosts } = require('./posts');
       if (opts.all) {
-        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         const rows = swept.map((r) => (r.ok ? { ok: true, account: r.account, handle: r.handle, ...summarizePosts(r.items) } : r));
         const okCount = rows.filter((r) => r.ok).length;
         printResult({ ok: okCount === rows.length, okCount, total: rows.length, accounts: rows }, (r) => {
@@ -772,7 +795,7 @@ function buildProgram() {
       applyGlobals();
       const { listComments } = require('./comments');
       if (opts.all) {
-        const swept = await auth.sweepAccounts((name) => listComments({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => listComments({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         const okCount = swept.filter((r) => r.ok).length;
         printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept }, (r) => {
           const lines = ['Comments sweep (' + r.okCount + '/' + r.total + ' accounts):'];
@@ -843,22 +866,26 @@ function buildProgram() {
     });
 
   program
-    .command('completion')
-    .description('Print a bash/zsh completion script.')
-    .action(() => {
-      const script = [
-        '# captron completion (bash + zsh)',
-        '# usage: eval "$(captron completion)"',
-        '_captron_cmds="login logout whoami accounts use post probe fit posts content sync calendar caption analytics best-time audit hook download drafts batch delete trending hashtags comments config new clean update doctor completion"',
-        'if [ -n "$BASH_VERSION" ]; then',
-        '  _captron() { local cur="${COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "$_captron_cmds" -- "$cur")); }',
-        '  complete -F _captron captron',
-        'elif [ -n "$ZSH_VERSION" ]; then',
-        '  _captron() { local -a cmds; cmds=(${(s: :)_captron_cmds}); _describe "captron" cmds; }',
-        '  compdef _captron captron',
-        'fi',
-        '',
-      ].join('\n');
+    .command('completion [shell]')
+    .description('Print a shell completion script (bash, zsh, fish) — generated from the current commands.')
+    .action((shell) => {
+      const sh = String(shell || 'bash').toLowerCase();
+      const { buildBashCompletion, buildZshCompletion, buildFishCompletion } = require('./completion');
+      const toFlag = (o) => ({ long: o.long || null, short: o.short || null, desc: o.description || '', takesValue: Boolean(o.required || o.optional) });
+      // Skip commander's auto-added --help on every command (noise); keep the rest.
+      const cmdFlags = (c) => (c.options || []).filter((o) => o.long !== '--help' && o.short !== '-h').map(toFlag);
+      const cmds = programRef.commands
+        .filter((c) => c.name())
+        .map((c) => ({ name: c.name(), desc: c.description() || '', flags: cmdFlags(c) }));
+      const globals = (programRef.options || []).filter((o) => o.long !== '--help').map(toFlag);
+      let script;
+      if (sh === 'bash') script = buildBashCompletion(cmds, globals);
+      else if (sh === 'zsh') script = buildZshCompletion(cmds, globals);
+      else if (sh === 'fish') script = buildFishCompletion(cmds, globals);
+      else {
+        utils.fail('unknown shell "' + shell + '" (usage: captron completion [bash|zsh|fish])');
+        process.exit(1);
+      }
       process.stdout.write(script);
     });
 
@@ -1024,7 +1051,7 @@ function buildProgram() {
       const { syncAccount } = require('./sync');
       if (opts.all) {
         const params = { days: Number(opts.days), limit: Number(opts.limit), commentsLimit: Number(opts.comments), headless: globalOptions.headless };
-        const swept = await auth.sweepAccounts((name) => syncAccount({ account: name, ...params }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => syncAccount({ account: name, ...params }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         const combined = { ok: swept.every((r) => r.ok), okCount: swept.filter((r) => r.ok).length, total: swept.length, accounts: swept, syncedAt: new Date().toISOString() };
         if (opts.out) {
           try {
@@ -1075,7 +1102,7 @@ function buildProgram() {
       const { listPostsApi } = require('./posts');
       const { groupScheduled } = require('./sync');
       if (opts.all) {
-        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, limit: Number(opts.limit), scheduledOnly: true, headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, limit: Number(opts.limit), scheduledOnly: true, headless: globalOptions.headless }), { fallback: globalOptions.account || 'main', jobs: globalOptions.jobs });
         const okCount = swept.filter((r) => r.ok).length;
         printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept.map((r) => (r.ok ? { ok: true, account: r.account, handle: r.handle, queue: groupScheduled(r.items, Number(opts.days) || 14).groups } : r)) }, (r) => {
           const lines = ['Queue sweep (' + r.okCount + '/' + r.total + ' accounts):'];
@@ -1136,4 +1163,4 @@ function main(argv) {
   program.parse(argv);
 }
 
-module.exports = { main, buildProgram };
+module.exports = { main, buildProgram, readJobsFlag };

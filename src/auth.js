@@ -12,6 +12,7 @@ const {
   warn,
   sleep,
   withTimeout,
+  runPool,
 } = require('./utils');
 
 const TIKTOK_DOMAINS = [
@@ -124,32 +125,29 @@ async function whoami({ account = 'main' } = {}) {
 
 /**
  * `captron whoami --all` — session status for every known account.
- * Sequential launches (one context at a time); a broken profile reports
- * ok:false for that row instead of failing the whole sweep.
+ * `jobs` bounds parallel launches (default 1, sequential). A broken
+ * profile reports ok:false for that row instead of failing the sweep.
  */
-async function whoamiAll({ headless = true } = {}) {
+async function whoamiAll({ headless = true, jobs = 1 } = {}) {
   const list = accounts();
-  const rows = [];
-  for (const a of list.accounts) {
+  const checkOne = async (a) => {
     try {
       const context = await launchProfile({ account: a.name, headless });
       try {
-        if (!(await isLoggedIn(context))) {
-          rows.push({ account: a.name, loggedIn: false, handle: null });
-          continue;
-        }
+        if (!(await isLoggedIn(context))) return { account: a.name, loggedIn: false, handle: null };
         const page = await context.newPage();
         await page.goto(URLS.creatorCenter, { waitUntil: 'domcontentloaded' }).catch(() => {});
         await sleep(2500);
         const handle = await resolveHandle(page).catch(() => null);
-        rows.push({ account: a.name, loggedIn: true, handle: handle ? handle.replace(/^\/@?/, '') : null });
+        return { account: a.name, loggedIn: true, handle: handle ? handle.replace(/^\/@?/, '') : null };
       } finally {
         await context.close().catch(() => {});
       }
     } catch (err) {
-      rows.push({ account: a.name, loggedIn: false, handle: null, error: String(err.message).split('\n')[0] });
+      return { account: a.name, loggedIn: false, handle: null, error: String(err.message).split('\n')[0] };
     }
-  }
+  };
+  const rows = await runPool(list.accounts, checkOne, jobs);
   return { ok: true, activeAccount: list.activeAccount, accounts: rows };
 }
 
@@ -172,24 +170,22 @@ function resolveTargets({ to = null, all = false, fallback = 'main' } = {}) {
 }
 
 /**
- * Run an async per-account fn over every known profile (sequential).
- * A throwing account resolves as { ok:false, account, error } so one
- * broken profile never kills a fleet sweep. Used by --all read commands.
+ * Run an async per-account fn over every known profile.
+ * `jobs` bounds parallelism (default 1 = sequential, the safe mode for
+ * browser-driven flows). Results keep config order. A throwing account
+ * resolves as { ok:false, account, error } so one broken profile never
+ * kills a fleet sweep. Used by every --all read command.
  */
-async function sweepAccounts(fn, { fallback = 'main' } = {}) {
+async function sweepAccounts(fn, { fallback = 'main', jobs = 1 } = {}) {
   const names = resolveTargets({ all: true, fallback });
-  const out = [];
-  for (const name of names) {
+  return runPool(names, async (name) => {
     try {
-      out.push(await fn(name));
+      return await fn(name);
     } catch (err) {
-      out.push({ ok: false, account: name, error: String((err && err.message) || err).split('\n')[0] });
+      return { ok: false, account: name, error: String((err && err.message) || err).split('\n')[0] };
     }
-  }
-  return out;
+  }, jobs);
 }
-
-/** `captron logout [--account]` */
 async function logout({ account = 'main' } = {}) {
   const context = await launchProfile({ account });
   if (await isLoggedIn(context)) {
