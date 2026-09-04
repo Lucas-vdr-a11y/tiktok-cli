@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — 2026-09-04
+
+Media prep + strictness wave (73 tests pass).
+
+- `probe <file>` — offline TikTok-readiness verdict (size, codec via
+  ffprobe, duration, landscape/vertical hints). Exit 1 when unfit.
+- `fit <input> -o <out>` — normalize to vertical 1080x1920 H.264/AAC +
+  faststart via ffmpeg (pure argv builder, graceful without ffmpeg).
+- `doctor --fix` — removes stale Chromium Singleton locks from profiles
+  (the classic "profile in use" failure after a crash).
+- `post --strict` / `batch --strict` — fail on validation warnings
+  (overlong caption, large file) instead of posting anyway.
+- `batch --jitter <sec>` — random 0..N extra delay between posts
+  (rate-limit friendly on top of `--delay`).
+
 ## 0.4.0 — 2026-09-04
 
 Second wave on the same branch (64 tests pass).

@@ -22,8 +22,10 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron login [account]` — log in via QR; `--from seed.json` imports a session non-interactively
 - `captron whoami [account]` — session status + handle
 - `captron accounts` — list profiles
-- `captron post <video> [opts]` — upload + publish (or draft); `--retries 2` retries failures
+- `captron post <video> [opts]` — upload + publish (or draft); `--retries 2` retries failures, `--strict` fails on warnings
 - `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
+- `captron probe <file>` — offline TikTok-readiness check (size, codec, duration, verdict)
+- `captron fit <input> -o <out>` — normalize to vertical 1080x1920 H.264/AAC via ffmpeg
 - `captron posts [account] --query <text> --sort top|liked --scheduled --export posts.csv` — posts with stats + download URLs
 - `captron content [account]` — posts + drafts in one call
 - `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts in one call
@@ -35,9 +37,9 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron trending --limit 20` — trending hashtags (caption research)
 - `captron hashtags <tag>` — hashtag detail + related tags
 - `captron comments --limit 20` — recent comments (best-effort)
-- `captron batch <manifest> [--delay 20 --state progress.json --resume progress.json --shuffle --stop-on-error]` — post many (JSON/CSV)
+- `captron batch <manifest> [--delay 20 --jitter 8 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many (JSON/CSV)
 - `captron config [key] [value]` — get/set config; `captron new <series>` scaffolds a manifest
-- `captron doctor` — environment check (node, browsers, ffmpeg, disk, session)
+- `captron doctor [--fix]` — environment check; `--fix` clears stale Chromium locks
 
 ## Key options for `post`
 
@@ -49,7 +51,8 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `--slideshow <paths>` — comma-separated image paths (up to 10) for a slideshow; overrides `<video>`
 - `--allow-comments/--no-allow-comments`, `--allow-duet/--no-allow-duet`, `--allow-stitch/--no-allow-stitch`
 - `--cover <seconds>` — cover frame timestamp (best-effort)
-- `--timeout <seconds>` / `--dry-run` — give up after N s / validate only
+- `--timeout <seconds>` / `--retries <n>` / `--dry-run` — give up after N s / retry failures / validate only
+- `--strict` — fail on warnings (long caption, large file) instead of posting
 - `--headless` — run browser without a window (or `CAPTRON_HEADLESS=1`)
 - `--json` — machine-readable output (use this in scripts/agents; or `CAPTRON_JSON=1`)
 - `-a, --account <name>` — pick account profile (or `CAPTRON_ACCOUNT`)

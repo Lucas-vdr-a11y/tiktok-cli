@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { launchProfile } = require('./browser');
 const { performPost, handlePostError, NotLoggedInError } = require('./upload');
-const { buildCaption, parseSchedule, formatDate, warn, info, ok, fail, printResult, sleep } = require('./utils');
+const { buildCaption, buildCaptionDetailed, parseSchedule, formatDate, warn, info, ok, fail, printResult, sleep } = require('./utils');
 
 /** Parse a manifest file (JSON array, {items:[...]}, single object, or CSV). */
 function parseManifest(file) {
@@ -47,10 +47,12 @@ function buildPlan(specs, { defaultAccount, defaultDraft }) {
   return specs.map((s) => {
     const scheduleDate = parseSchedule(s.schedule);
     const toBool = (v) => (v === true || v === 'true' || v === 'yes' || v === '1' ? true : v === false || v === 'false' || v === 'no' || v === '0' ? false : null);
+    const detailed = buildCaptionDetailed({ caption: s.caption, hashtags: s.hashtags });
     return {
       index: s.index,
       video: s.video,
-      caption: buildCaption({ caption: s.caption, hashtags: s.hashtags }),
+      caption: detailed.text,
+      warnings: detailed.warnings,
       schedule: s.schedule,
       scheduleDate, // actual Date (used to post)
       scheduleLabel: formatDate(scheduleDate), // display only
@@ -76,7 +78,7 @@ function validateSpec(s, scheduleDate) {
 }
 
 /** Run a batch: post every spec, respecting per-account sessions + delay. */
-async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
+async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, jitterSec = 0, strict = false, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
   let specs = parseManifest(manifest);
   if (shuffle) {
     for (let i = specs.length - 1; i > 0; i--) {
@@ -86,6 +88,11 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
     specs.forEach((s, i) => (s.index = i));
   }
   let plan = buildPlan(specs, { defaultAccount, defaultDraft });
+  if (strict) {
+    for (const p of plan) {
+      if (p.warnings && p.warnings.length) p.errors.push('strict: ' + p.warnings.join('; '));
+    }
+  }
   const bad = plan.filter((p) => p.errors.length);
   if (bad.length) {
     for (const b of bad) fail('spec #' + (b.index + 1) + ': ' + b.errors.join('; ') + '  => ' + b.video);
@@ -153,9 +160,12 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
         if (stateFile) {
           try { fs.writeFileSync(path.resolve(stateFile), JSON.stringify({ manifest, results }, null, 2)); } catch (_) {}
         }
-        if (delaySec > 0 && spec.index < specs.length - 1) {
-          info('  waiting ' + delaySec + 's before next…');
-          await sleep(delaySec * 1000);
+        const waitSec = Number(delaySec) || 0;
+        const jitSec = Math.max(0, Number(jitterSec) || 0);
+        const total = waitSec + (jitSec > 0 ? Math.random() * jitSec : 0);
+        if (total > 0 && spec.index < specs.length - 1) {
+          info('  waiting ' + Math.round(total) + 's before next…');
+          await sleep(total * 1000);
         }
       }
     }

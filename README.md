@@ -41,8 +41,10 @@ captron content          # lists posts + drafts
 | `logout [account]` | Clear a saved session. |
 | `whoami [account]` | Show session status + handle. |
 | `accounts` | List configured account profiles. |
-| `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--retries 2` retries failures. Use `--slideshow` for images. |
+| `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--retries 2` retries failures, `--strict` fails on warnings. Use `--slideshow` for images. |
 | `post <video> --slideshow <paths>` | Upload a slideshow of images (comma-separated, up to 10). |
+| `probe <file>` | Offline TikTok-readiness check (size, codec, duration, verdict). |
+| `fit <input> -o <out>` | Normalize to vertical 1080x1920 H.264/AAC via ffmpeg (offline). |
 | `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--export posts.csv`. |
 | `download [postId]` | Download one of your published videos (default: most recent). `--all --limit 10 --out-dir ./clips` for bulk. |
 | `content [account]` | Posts + drafts in one call. |
@@ -54,11 +56,11 @@ captron content          # lists posts + drafts
 | `trending` | Trending hashtags from Explore (caption research). |
 | `hashtags <tag>` | Hashtag detail + related tags. |
 | `comments [account]` | Recent comments on your posts (best-effort). |
-| `batch <manifest>` | Post many videos from a JSON/CSV manifest. |
+| `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--strict` fails warned items. |
 | `config [key] [value]` | Get/set config (no args lists all). |
 | `new <name>` | Scaffold a `<name>.manifest.json` series template. |
 | `completion` | Print bash/zsh completion (`eval "$(captron completion)"`). |
-| `doctor` | Check environment, browser, ffmpeg, disk, profiles, session. |
+| `doctor [--fix]` | Check environment, browser, ffmpeg, disk, profiles, session. `--fix` clears stale Chromium locks. |
 
 ### `post` options
 
@@ -75,10 +77,20 @@ captron content          # lists posts + drafts
 --cover <seconds>          Cover frame timestamp (best-effort)
 --timeout <seconds>        Give up after N seconds
 --retries <n>              Retry failed posts up to N times
+--strict                   Fail on warnings (long caption, large file) instead of posting
 --dry-run                  Validate inputs without posting
 --headless                 Run browser headless (or CAPTRON_HEADLESS=1)
 --json                     Machine-readable output (or CAPTRON_JSON=1)
 -a, --account <name>       Account profile to use (or CAPTRON_ACCOUNT)
+```
+
+### Media prep (offline, before posting)
+
+```bash
+captron probe ./clip.mp4        # verdict: fits TikTok? codec/duration/size issues?
+captron fit ./clip.mp4 -o ./ready.mp4   # vertical 1080x1920 H.264/AAC + faststart
+captron post ./ready.mp4 --strict       # refuse to post when anything warns
+captron doctor --fix                    # clear stale Chromium locks ("profile in use")
 ```
 
 ### Batch posting

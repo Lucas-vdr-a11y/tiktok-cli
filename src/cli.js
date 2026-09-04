@@ -72,6 +72,11 @@ async function runPost(videoArg, opts) {
   }
   const { text: caption, warnings } = buildCaptionDetailed({ caption: captionOpt, hashtags: opts.hashtags });
   for (const w of warnings) utils.warn(w);
+  const strictWarnings = [...warnings, ...((!isSlideshow && vcheck && vcheck.warning) ? [vcheck.warning] : [])];
+  if (opts.strict && strictWarnings.length) {
+    utils.fail('Strict mode: ' + strictWarnings.join('; '));
+    process.exit(1);
+  }
   const parseFlag = (v, nv) => (v === true || nv === false ? true : v === false || nv === true ? false : null);
   // commander --no-* gives opts.allowComments=false etc; support both spellings.
   const allowComment = opts.allowComments != null ? Boolean(opts.allowComments) : opts.allowComment != null ? Boolean(opts.allowComment) : null;
@@ -226,6 +231,8 @@ function buildProgram() {
     .option('--cover <seconds>', 'cover frame timestamp in seconds (best-effort)', null)
     .option('--timeout <seconds>', 'give up after N seconds (default: no timeout)', null)
     .option('--retries <n>', 'retry failed posts up to N times (default: 0)', '0')
+    .option('--strict', 'fail on validation warnings (long caption, large file)')
+    .option('--dry-run', 'validate inputs and print the plan without posting')
     .action(runPost);
 
   program
@@ -361,8 +368,10 @@ function buildProgram() {
     .description('Post (or draft) many videos from a JSON/CSV manifest — one command for a whole content pipeline.')
     .option('-d, --draft', 'save every item as draft instead of publishing')
     .option('--delay <seconds>', 'seconds to wait between posts', '0')
+    .option('--jitter <seconds>', 'random extra delay 0..N between posts (rate-limit friendly)', '0')
     .option('--max-per-day <n>', 'hard cap on posts per run', '0')
     .option('--dry-run', 'validate the manifest and print the plan without posting')
+    .option('--strict', 'fail manifests with validation warnings')
     .option('--stop-on-error', 'stop at the first failed post (default: continue)')
     .option('--shuffle', 'post manifest items in random order')
     .option('--resume <file>', 'skip items already posted per a previous --state file', null)
@@ -374,6 +383,8 @@ function buildProgram() {
         defaultAccount: globalOptions.account,
         defaultDraft: opts.draft || false,
         delaySec: Number(opts.delay),
+        jitterSec: Number(opts.jitter),
+        strict: Boolean(opts.strict),
         dryRun: opts.dryRun || false,
         headless: globalOptions.headless,
         maxPerDay: Number(opts.maxPerDay),
@@ -570,7 +581,7 @@ function buildProgram() {
       const script = [
         '# captron completion (bash + zsh)',
         '# usage: eval "$(captron completion)"',
-        '_captron_cmds="login logout whoami accounts post posts content analytics audit hook download drafts batch delete trending hashtags comments config new doctor completion"',
+        '_captron_cmds="login logout whoami accounts post probe fit posts content analytics audit hook download drafts batch delete trending hashtags comments config new doctor completion"',
         'if [ -n "$BASH_VERSION" ]; then',
         '  _captron() { local cur="${COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "$_captron_cmds" -- "$cur")); }',
         '  complete -F _captron captron',
@@ -584,10 +595,51 @@ function buildProgram() {
     });
 
   program
+    .command('probe <file>')
+    .description('Inspect a video/image for TikTok-readiness (offline: size, codec, duration, fit verdict).')
+    .action((file) => {
+      applyGlobals();
+      const { probeFile } = require('./media');
+      const res = probeFile(file);
+      printResult(res, (r) => {
+        if (!r.ok && r.error) return 'Probe failed: ' + r.error;
+        const lines = ['Probe ' + r.file + ' (' + r.sizeHuman + ', ' + r.kind + '):'];
+        if (r.durationSec != null) lines.push('  duration: ' + r.durationSec + 's');
+        if (r.width) lines.push('  video:    ' + r.width + 'x' + r.height + ' ' + (r.vcodec || '') + (r.acodec ? ' + ' + r.acodec : ''));
+        lines.push('  verdict:  ' + (r.fitsTikTok ? 'fits TikTok ✔' : 'needs work ✖'));
+        for (const i of r.issues) lines.push('  issue:    ' + i);
+        for (const w of r.warnings) lines.push('  warning:  ' + w);
+        return lines.join('\n');
+      });
+      process.exit(res.fitsTikTok ? 0 : 1);
+    });
+
+  program
+    .command('fit <input>')
+    .description('Normalize a video to vertical 1080x1920 H.264/AAC MP4 via ffmpeg (offline).')
+    .option('-o, --out <path>', 'output path (default: <input>.tiktok.mp4)', null)
+    .option('--width <n>', 'target width', '1080')
+    .option('--height <n>', 'target height', '1920')
+    .option('--fps <n>', 'target fps', '30')
+    .action((input, opts) => {
+      applyGlobals();
+      const { fitFile } = require('./media');
+      const res = fitFile({ input, output: opts.out, width: Number(opts.width), height: Number(opts.height), fps: Number(opts.fps) });
+      printResult(res, (r) => (r.ok ? 'Fitted ' + r.output + ' (' + utils.formatBytes(r.bytes) + ') ✔' : 'Fit failed: ' + r.error));
+      process.exit(res.ok ? 0 : 1);
+    });
+
+  program
     .command('doctor')
     .description('Check environment: node, browser engines, ffmpeg, disk, profiles, session state.')
-    .action(async () => {
+    .option('--fix', 'remove stale Chromium lock files from profiles')
+    .action(async (opts) => {
       applyGlobals();
+      if (opts.fix) {
+        const { fixStaleLocks } = require('./media');
+        const fixed = fixStaleLocks();
+        utils.ok(fixed.removed.length ? 'Removed ' + fixed.removed.length + ' stale lock(s): ' + fixed.removed.join(', ') : 'No stale locks found.');
+      }
       const fs = require('fs');
       const { execSync } = require('child_process');
       const { chromium } = require('playwright');
