@@ -44,7 +44,7 @@ captron content          # lists posts + drafts
 | `post <video> [options]` | Upload + caption + publish (or draft) in one action. |
 | `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. |
 | `download [postId]` | Download one of your published videos (default: most recent). |
-| `analytics [account]` | Views, likes, comments, shares, followers, viewers (last 1/7/28/60 days). |
+| `analytics [account]` | Account metrics (+ recent posts w/ stats) — `analytics --posts <n>`. |
 | `drafts [account]` | List saved drafts. |
 | `batch <manifest>` | Post many videos from a JSON/CSV manifest. |
 | `doctor` | Check environment, browser, profiles, session. |
