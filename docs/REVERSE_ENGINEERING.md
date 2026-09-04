@@ -51,7 +51,7 @@ The publish request carries `msToken`, `X-Bogus`, and `X-Gnarly` — anti-bot si
 | POST | `/tiktok/v1/creator/content/check/create` | Start content check |
 | GET | `/tiktok/v1/creator/content/check/` | Poll check status |
 | POST | `/tiktok/web/project/post/v1/` | **Publish** |
-| POST | `/tiktok/creator/manage/item_list/v1/` | List posts |
+| POST | `/tiktok/creator/manage/item_list/v1/` | List posts (cursor/size pagination, per-post stats + download URLs, **no signature**) |
 | POST | `/tiktok/v1/creator/publish_setting/` | Publish settings |
 | GET | `/tiktok/v1/analytics/insights/` | **Analytics metrics (batched, no signature)** |
 
@@ -71,6 +71,18 @@ GET /tiktok/v1/analytics/insights/
 - Metric ids (mapped by probing 1–160, 2026-09): views **121**, profile views **122**, likes **123**, comments **124**, shares **125**, creator rewards **126**, traffic sources **127**, new viewers **140**, total viewers **141**, viewer active days **145**, active hours **146**, followers **160**.
 - The response keys metrics by semantic name (`analytics_overview_views`, `analytics_follower_total_followers`, …) — see `RESPONSE_KEYS` in `src/analytics.js`.
 - Each metric wraps its fields (`total`, `delta_change`, `percent_change`, `list`, `key_value`) as `{message: {data_source, status, timestamp}, value?}`. Status **1** = ok, **2** = no data/empty, 7/9/10 = not applicable. `src/analytics.js#unwrap` strips this envelope.
+
+## Posts list API (`item_list`)
+
+`POST /tiktok/creator/manage/item_list/v1/` with JSON body
+`{"cursor":0,"size":50,"query":{"sort_orders":[{"field_name":"post_time","order":2}],"conditions":[],"is_recent_posts":false}}`
+and headers `content-type: application/json`, `agw-js-conv: str`. **No signature needed.**
+
+Response `{item_list, cursor, has_more, status_code}` — each item includes
+`item_id, desc, create_time, duration, play_count, like_count, comment_count,
+share_count, favorite_count, visibility (1=public/0=private), in_review,
+is_pinned, status (102 = published/live), cover_url[], download_info.download_urls[]`
+(signed CDN links, last entry is watermark-free play addr). See `src/posts.js`.
 
 ## Localization
 

@@ -190,4 +190,4 @@ async function listDrafts({ account = 'main', limit = 20, headless = false } = {
   return { ok: true, account, handle: res.handle, items: res.drafts.items, total: res.drafts.total };
 }
 
-module.exports = { listContent, listPosts, listDrafts, scrapeContent, openContentPage, switchTab, scrapeItems };
+module.exports = { listContent, listPosts, listDrafts, scrapeContent, openContentPage, switchTab, scrapeItems, resolveHandleFromPage };

@@ -93,3 +93,49 @@ test('METRICS: known reverse-engineered ids', () => {
 test('VALID_RANGES: TikTok only accepts 1/7/28/60', () => {
   assert.deepEqual(VALID_RANGES, [1, 7, 28, 60]);
 });
+
+const { normalizeItem } = require('../../src/posts');
+
+test('posts.normalizeItem: full raw item', () => {
+  const raw = {
+    item_id: '1234567890',
+    desc: ' My caption #fyp ',
+    create_time: '1787788800',
+    duration: 3019,
+    play_count: '1200',
+    like_count: '34',
+    comment_count: '5',
+    share_count: '2',
+    favorite_count: '11',
+    visibility: 1,
+    in_review: true,
+    is_pinned: false,
+    status: 102,
+    cover_url: ['https://example.com/cover.jpg'],
+    download_info: { allow_download: true, download_urls: ['https://a', 'https://b', 'https://c'] },
+  };
+  const it = normalizeItem(raw);
+  assert.equal(it.id, '1234567890');
+  assert.equal(it.caption, 'My caption #fyp');
+  assert.equal(it.createTime, 1787788800000);
+  assert.equal(it.durationMs, 3019);
+  assert.deepEqual(it.stats, { views: 1200, likes: 34, comments: 5, shares: 2, favorites: 11 });
+  assert.equal(it.visibility, 'public');
+  assert.equal(it.inReview, true);
+  assert.equal(it.coverUrl, 'https://example.com/cover.jpg');
+  assert.equal(it.downloadUrl, 'https://c');
+});
+
+test('posts.normalizeItem: private visibility and missing fields', () => {
+  const it = normalizeItem({ item_id: '42', visibility: 0 });
+  assert.equal(it.visibility, 'private');
+  assert.equal(it.caption, '');
+  assert.deepEqual(it.stats, { views: 0, likes: 0, comments: 0, shares: 0, favorites: 0 });
+  assert.equal(it.coverUrl, null);
+  assert.equal(it.downloadUrl, null);
+});
+
+test('posts.normalizeItem: null input returns null', () => {
+  assert.equal(normalizeItem(null), null);
+  assert.equal(normalizeItem('x'), null);
+});

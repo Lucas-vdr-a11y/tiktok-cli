@@ -169,19 +169,24 @@ function buildProgram() {
 
   program
     .command('posts [account]')
-    .description('List published posts.')
+    .description('List published posts with stats (views, likes, comments, shares) and download URLs.')
     .option('--limit <n>', 'max posts', '20')
     .action(async (account, opts) => {
       applyGlobals();
-      const res = await contentLib.listPosts({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
+      const { listPostsApi } = require('./posts');
+      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
       printResult(res, (r) => {
-        const lines = ['Posts (' + r.items.length + (r.total > r.items.length ? '/' + r.total : '') + '):'];
+        const lines = ['Posts on @' + (r.handle || r.account || '?') + ' (' + r.items.length + '):'];
         for (const it of r.items) {
-          lines.push('  ' + (it.id || '?') + '  ' + (it.caption || '').slice(0, 50) + '  ' + (it.url || ''));
+          const s = it.stats || {};
+          const when = it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '?';
+          lines.push('  ' + it.id + '  ' + when + '  ' + (it.caption || '(no caption)').slice(0, 40));
+          lines.push('      views ' + (s.views != null ? s.views : '?') + ' · likes ' + (s.likes != null ? s.likes : '?') + ' · comments ' + (s.comments != null ? s.comments : '?') + ' · shares ' + (s.shares != null ? s.shares : '?') + (it.inReview ? '  [in review]' : ''));
         }
         if (r.error) lines.push('  error: ' + r.error);
         return lines.join('\n');
       });
+      if (!res.ok) process.exit(1);
     });
 
   program
@@ -211,12 +216,13 @@ function buildProgram() {
 
   program
     .command('analytics [account]')
-    .description('Account analytics: views, likes, comments, shares, followers, viewers — last N days.')
+    .description('Account analytics: views, likes, comments, shares, followers, viewers — last N days. Add --posts to include recent posts with stats.')
     .option('-d, --days <n>', 'range: 1, 7, 28 or 60 days', '7')
+    .option('-p, --posts <n>', 'also include N most recent posts with per-post stats', '0')
     .action(async (account, opts) => {
       applyGlobals();
       const { analytics } = require('./analytics');
-      const res = await analytics({ account: account || globalOptions.account || 'main', days: Number(opts.days), headless: globalOptions.headless });
+      const res = await analytics({ account: account || globalOptions.account || 'main', days: Number(opts.days), posts: Number(opts.posts), headless: globalOptions.headless });
       printResult(res, (r) => {
         const lines = ['Analytics for @' + (r.handle || r.account || '?') + ' (last ' + r.range_days + ' days):'];
         for (const [name, m] of Object.entries(r.metrics || {})) {
@@ -225,6 +231,17 @@ function buildProgram() {
           const pct = m.percent_change != null ? ' (' + (m.percent_change >= 0 ? '+' : '') + m.percent_change + '%)' : '';
           lines.push('  ' + name.padEnd(14) + String(m.total != null ? m.total : '—') + (delta ? '  ' + delta : '') + pct);
         }
+        if (r.posts && r.posts.length) {
+          lines.push('');
+          lines.push('Recent posts (' + r.posts.length + '):');
+          for (const it of r.posts) {
+            const s = it.stats || {};
+            const when = it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '?';
+            lines.push('  ' + it.id + '  ' + when + '  ' + (it.caption || '(no caption)').slice(0, 36));
+            lines.push('      views ' + s.views + ' · likes ' + s.likes + ' · comments ' + s.comments + ' · shares ' + s.shares);
+          }
+        }
+        if (r.posts_error) lines.push('  posts error: ' + r.posts_error);
         if (r.error) lines.push('  error: ' + r.error);
         return lines.join('\n');
       });

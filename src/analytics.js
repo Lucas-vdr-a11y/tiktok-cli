@@ -125,9 +125,11 @@ async function fetchInsights(page, types, dateRange) {
 
 /**
  * `captron analytics` — account-level metrics for the last N days.
- * Returns { ok, account, handle, range_days, metrics: { views: {...}, ... } }.
+ * With `posts > 0`, also returns the most recent posts with per-post stats
+ * (from /tiktok/creator/manage/item_list/v1/) in the same session.
+ * Returns { ok, account, handle, range_days, metrics, posts? }.
  */
-async function analytics({ account = 'main', days = 7, headless = false } = {}) {
+async function analytics({ account = 'main', days = 7, posts = 0, headless = false } = {}) {
   const range = VALID_RANGES.includes(Number(days)) ? Number(days) : 7;
   const overviewTypes = [METRICS.views, METRICS.profile_views, METRICS.likes, METRICS.comments, METRICS.shares, METRICS.followers, METRICS.new_viewers, METRICS.total_viewers];
   const names = ['views', 'profile_views', 'likes', 'comments', 'shares', 'followers', 'new_viewers', 'total_viewers'];
@@ -155,7 +157,21 @@ async function analytics({ account = 'main', days = 7, headless = false } = {}) 
         return m ? m[1] : null;
       })
       .catch(() => null);
-    return { ok: true, account, handle, range_days: range, metrics };
+    const out = { ok: true, account, handle, range_days: range, metrics };
+    if (Number(posts) > 0) {
+      const { fetchItemPage, normalizeItem } = require('./posts');
+      const postBody = await fetchItemPage(page, { cursor: 0, size: Math.min(Number(posts), 50) }).catch((err) => {
+        verbose('item_list failed: ' + err.message.split('\n')[0]);
+        return null;
+      });
+      if (postBody && postBody.status_code === 0) {
+        out.posts = (postBody.item_list || []).slice(0, Number(posts)).map(normalizeItem);
+      } else {
+        out.posts = [];
+        out.posts_error = 'item_list status_code ' + (postBody && postBody.status_code);
+      }
+    }
+    return out;
   } finally {
     await context.close().catch(() => {});
   }

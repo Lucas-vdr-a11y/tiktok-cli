@@ -42,7 +42,7 @@ captron content          # lists posts + drafts
 | `whoami [account]` | Show session status + handle. |
 | `accounts` | List configured account profiles. |
 | `post <video> [options]` | Upload + caption + publish (or draft) in one action. |
-| `posts [account]` | List published posts. |
+| `posts [account]` | List published posts **with stats (views/likes/comments/shares), review state and download URLs**. |
 | `drafts [account]` | List saved drafts. |
 | `drafts --publish <id>` | Publish a saved draft. |
 | `drafts --delete <id>` | Delete a draft. |
