@@ -69,8 +69,28 @@ function normalizeItem(it) {
   };
 }
 
+/**
+ * Pure post filtering/sorting (unit-tested). `since` accepts anything
+ * Date.parse understands ("2026-08-01", ISO datetime); invalid → ignored.
+ */
+function filterPosts(items, { query = null, sort = 'new', scheduledOnly = false, since = null } = {}) {
+  let out = items || [];
+  if (scheduledOnly) out = out.filter((it) => it.scheduledTime);
+  if (since) {
+    const ts = Date.parse(since);
+    if (Number.isFinite(ts)) out = out.filter((it) => it.createTime && it.createTime >= ts);
+  }
+  if (query) {
+    const q = String(query).toLowerCase();
+    out = out.filter((it) => (it.caption || '').toLowerCase().includes(q) || String(it.id).includes(q));
+  }
+  if (sort === 'top') out = [...out].sort((a, b) => (b.stats.views || 0) - (a.stats.views || 0));
+  else if (sort === 'liked') out = [...out].sort((a, b) => (b.stats.likes || 0) - (a.stats.likes || 0));
+  return out;
+}
+
 /** Fetch up to `limit` posts with stats (auto-paginates in size-50 batches). */
-async function listPostsApi({ account = 'main', limit = 20, headless = false } = {}) {
+async function listPostsApi({ account = 'main', limit = 20, headless = false, query = null, sort = 'new', scheduledOnly = false, since = null } = {}) {
   const context = await launchProfile({ account, headless });
   try {
     if (!(await isLoggedIn(context))) return { ok: false, error: 'not logged in', account, handle: null, items: [] };
@@ -83,7 +103,8 @@ async function listPostsApi({ account = 'main', limit = 20, headless = false } =
     const items = [];
     let cursor = 0;
     let hasMore = true;
-    while (hasMore && items.length < limit) {
+    const need = query ? Math.max(Number(limit) || 20, 50) : Number(limit) || 20;
+    while (hasMore && items.length < need) {
       const body = await fetchItemPage(page, { cursor, size: 50 }).catch((err) => {
         verbose('item_list failed: ' + err.message.split('\n')[0]);
         return null;
@@ -100,10 +121,87 @@ async function listPostsApi({ account = 'main', limit = 20, headless = false } =
       cursor = Number(body.cursor) || cursor + 50;
       if (hasMore) await sleep(600);
     }
-    return { ok: true, account, handle, items: items.slice(0, limit), total: items.length };
+    const out = filterPosts(items, { query, sort, scheduledOnly, since }).slice(0, Number(limit) || 20);
+    return { ok: true, account, handle, items: out, total: items.length };
   } finally {
     await context.close().catch(() => {});
   }
+}
+
+/**
+ * Delete a published post by id through the Studio UI (best-effort).
+ * TikTok has no documented delete API — captron clicks the card's
+ * "More/Delete" flow on the content dashboard and confirms.
+ * Requires { yes: true } as a safety catch. Returns { ok, id }.
+ */
+async function deletePost({ account = 'main', postId, headless = false, yes = false } = {}) {
+  if (!postId) return { ok: false, error: 'missing post id' };
+  if (!yes) return { ok: false, error: 'refusing to delete without --yes (pass --yes to confirm)', id: String(postId) };
+  const { openContentPage } = require('./content');
+  const context = await launchProfile({ account, headless });
+  try {
+    if (!(await isLoggedIn(context))) return { ok: false, error: 'not logged in', account, id: String(postId) };
+    const page = await openContentPage(context, { tab: 'posts' });
+    await sleep(2000);
+    const found = await page.evaluate((id) => {
+      const cards = Array.from(document.querySelectorAll('a[href*="/video/"]'));
+      const a = cards.find((x) => (x.getAttribute('href') || '').includes(String(id)));
+      if (a) { a.scrollIntoView({ block: 'center' }); return true; }
+      return false;
+    }, String(postId)).catch(() => false);
+    if (!found) return { ok: false, error: 'post not found on the content dashboard (wrong account or id?)', id: String(postId) };
+    // Open the card menu (⋯) near the post link, then click Delete, then confirm.
+    const clicked = await page.evaluate((id) => {
+      const cards = Array.from(document.querySelectorAll('a[href*="/video/"]'));
+      const a = cards.find((x) => (x.getAttribute('href') || '').includes(String(id)));
+      if (!a) return null;
+      const card = a.closest('div')?.parentElement || a.parentElement;
+      const scope = card || document;
+      const btns = Array.from(scope.querySelectorAll('button'));
+      const more = btns.find((b) => /^(…|\.\.\.|more|meer|más|plus|mehr|更多|その他|더보기)$/i.test((b.textContent || '').trim()) || (b.getAttribute('aria-label') || '').toLowerCase().includes('more'));
+      if (more) { more.click(); return 'menu'; }
+      return null;
+    }, String(postId)).catch(() => null);
+    await sleep(1200);
+    const delLabels = ['delete', 'verwijderen', 'eliminar', 'supprimer', 'löschen', '删除', '削除', '삭제', 'excluir'];
+    let deleted = false;
+    for (let i = 0; i < 3 && !deleted; i++) {
+      deleted = await page.evaluate((labels) => {
+        const btns = Array.from(document.querySelectorAll('button, [role="menuitem"], li'));
+        const b = btns.find((x) => labels.includes((x.textContent || '').trim().toLowerCase()));
+        if (b) { b.click(); return true; }
+        return false;
+      }, delLabels).catch(() => false);
+      await sleep(1000);
+      // confirm dialog
+      const confirmed = await page.evaluate((labels) => {
+        const btns = Array.from(document.querySelectorAll('button'));
+        const b = btns.find((x) => ['confirm', 'bevestigen', 'confirmar', 'confirmer', 'bestätigen', '确认', '確認', '확인', 'delete'].includes((x.textContent || '').trim().toLowerCase()));
+        if (b) { b.click(); return true; }
+        return false;
+      }, delLabels).catch(() => false);
+      if (confirmed) { await sleep(2000); deleted = true; }
+    }
+    void clicked;
+    return deleted
+      ? { ok: true, id: String(postId), account }
+      : { ok: false, error: 'delete flow did not complete — TikTok may have changed the menu; delete manually in Studio', id: String(postId) };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+/**
+ * Account health summary over normalized post items (pure, tested).
+ * Powers `captron audit` for one account or a whole fleet sweep.
+ */
+function summarizePosts(items) {
+  const list = (items || []).filter((it) => it && typeof it === 'object');
+  const sum = (f) => list.reduce((a, it) => a + ((it.stats && it.stats[f]) || 0), 0);
+  const avg = (f) => (list.length ? Math.round(sum(f) / list.length) : 0);
+  const top = [...list].sort((a, b) => ((b.stats && b.stats.views) || 0) - ((a.stats && a.stats.views) || 0)).slice(0, 3);
+  const flops = [...list].sort((a, b) => ((a.stats && a.stats.views) || 0) - ((b.stats && b.stats.views) || 0)).slice(0, 3).filter((it) => ((it.stats && it.stats.views) || 0) < avg('views'));
+  const noCaption = list.filter((it) => !(it.caption || '').trim());
+  return { scanned: list.length, totals: { views: sum('views'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares') }, averages: { views: avg('views'), likes: avg('likes') }, top: top.map((t) => t.id), flops: flops.map((t) => t.id), noCaption: noCaption.length };
 }
 
 /**
@@ -111,5 +209,5 @@ async function listPostsApi({ account = 'main', limit = 20, headless = false } =
  * the video stream the Studio grid plays, because the pre-signed `download_info`
  * URLs can 403 for non-browser clients and the play-API URL needs session cookies.
  */
-module.exports = { listPostsApi, fetchItemPage, normalizeItem };
+module.exports = { listPostsApi, fetchItemPage, normalizeItem, filterPosts, summarizePosts, deletePost };
 
