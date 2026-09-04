@@ -26,41 +26,61 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron accounts` — list profiles
 - `captron post <video> [opts]` — upload + publish (or draft)
 - `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
-- `captron posts [account]` — list published posts with per-post stats + download URLs
+- `captron posts [account] --query <text> --sort top|liked` — published posts with stats + download URLs
 - `captron content [account]` — posts + drafts in one call
-- `captron analytics [account] --days <1|7|28|60> --posts <n>` — account metrics + recent posts w/ stats in one call
-- `captron download [postId]` — download one of your published videos (default: most recent)
-- `captron drafts [account]` — list drafts; `--publish <id>` / `--delete <id>`
-- `captron batch <manifest>` — post many (JSON/CSV)
-- `captron doctor` — environment check
+- `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts in one call
+- `captron download [postId] -o out.mp4` — single video; `--all --limit 10 --out-dir ./clips --query <text>` for bulk
+- `captron delete <postId> --yes` — delete a published post (safety catch)
+- `captron drafts` — list drafts; `--publish <id>` / `--delete <id>`
+- `captron trending --limit 20` — trending hashtags (caption research)
+- `captron hashtags <tag>` — hashtag detail + related tags
+- `captron comments --limit 20` — recent comments (best-effort)
+- `captron batch <manifest> [--delay 20 --state progress.json --resume progress.json --shuffle --stop-on-error]` — post many (JSON/CSV)
+- `captron config [key] [value]` — get/set config; `captron new <series>` scaffolds a manifest
+- `captron doctor` — environment check (node, browsers, ffmpeg, disk, session)
 
 ## Key options for `post`
 
-- `-c, --caption <text>`
-- `-t, --hashtags <tags>` — comma-separated, no `#` needed
-- `-s, --schedule <when>` — `"YYYY-MM-DD HH:mm"` | `"tomorrow HH:mm"` | `"today HH:mm"` | `"+2h"` | `"+3d"`
+- `-c, --caption <text>` or `--desc-file <path>` (long AI captions)
+- `-t, --hashtags <tags>` — comma-separated, no `#` needed, deduped
+- `-s, --schedule <when>` — `"YYYY-MM-DD HH:mm"` | `"18:30"` | `"today 18:00"` | `"tomorrow 09:00"` | `"friday 18:00"` | `"+90m"` | `"+3d"` | `"in 2 hours"`
 - `-v, --visibility <who>` — `everyone` | `friends` | `private`
 - `-d, --draft` — save as draft instead of publishing
 - `--slideshow <paths>` — comma-separated image paths (up to 10) for a slideshow; overrides `<video>`
-- `--headless` — run browser without a window
-- `--json` — machine-readable output (use this in scripts/agents)
-- `-a, --account <name>` — pick account profile
+- `--allow-comments/--no-allow-comments`, `--allow-duet/--no-allow-duet`, `--allow-stitch/--no-allow-stitch`
+- `--cover <seconds>` — cover frame timestamp (best-effort)
+- `--timeout <seconds>` / `--dry-run` — give up after N s / validate only
+- `--headless` — run browser without a window (or `CAPTRON_HEADLESS=1`)
+- `--json` — machine-readable output (use this in scripts/agents; or `CAPTRON_JSON=1`)
+- `-a, --account <name>` — pick account profile (or `CAPTRON_ACCOUNT`)
 
 ## Batch posting
 
 ```bash
 captron batch ./manifest.json --delay 30 --max-per-day 4
+captron batch ./manifest.json --state progress.json --delay 20   # resumable
+captron batch ./manifest.json --resume progress.json             # skip done
 ```
 
-Manifest can be a JSON array, `{items:[...]}`, a single object, or CSV (`video,caption,hashtags,schedule,visibility,draft`).
+Manifest can be a JSON array, `{items:[...]}`, a single object, or CSV (`video,caption,hashtags,schedule,visibility,draft`). Items also accept `allowComment/allowDuet/allowStitch` + `cover`.
+
+## Research loop (faceless creators)
+
+```bash
+captron trending --limit 20
+captron hashtags ai --limit 10
+captron posts --sort top --limit 5
+captron analytics --days 28 --export metrics.csv --posts 5
+```
 
 ## Important behaviors
 
 1. **Two-click publish**: after the first "Post" click, TikTok may show a confirmation modal ("Continue posting? Still checking the video..."). Captron confirms it automatically. Publishing can take a few seconds.
 2. **Content check**: TikTok runs a server-side check (up to ~10 min). The confirmation modal lets you publish before it finishes.
-3. **Persistent sessions**: login state survives between runs in `~/.captron/profiles/<name>`. Use `CAPTRON_HOME` to relocate.
-4. **Exit codes**: `0` = success, `1` = failure. Check `--json` output for `ok`, `itemId`, `status`.
+3. **Persistent sessions**: login state survives between runs in `~/.captron/profiles/<name>`. Use `CAPTRON_HOME` to relocate. `CAPTRON_ACCOUNT` sets the default account.
+4. **Exit codes**: `0` = success, `1` = failure. Check `--json` output for `ok`, `itemId`, `status`. Batch continues past item failures unless `--stop-on-error`.
 5. **Headless**: pass `--headless` or set `CAPTRON_HEADLESS=1` for servers (no display).
+6. **Delete safety**: `captron delete <id>` refuses without `--yes`.
 
 ## Example: agent posting loop
 
@@ -75,4 +95,5 @@ done
 - `Not logged in` → run `captron login`
 - `Could not find a clickable Post button` → the editor may not have loaded; retry
 - `Timed out waiting for TikTok to confirm` → check `captron content` (the post may have gone live anyway); re-run with `--verbose` for the publish RPC details
+- `refusing to delete without --yes` → re-run with `--yes`
 - Stale session → `captron logout && captron login`

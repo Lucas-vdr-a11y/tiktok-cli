@@ -43,25 +43,39 @@ captron content          # lists posts + drafts
 | `accounts` | List configured account profiles. |
 | `post <video> [options]` | Upload + caption + publish (or draft) in one action. Use `--slideshow` for images. |
 | `post <video> --slideshow <paths>` | Upload a slideshow of images (comma-separated, up to 10). |
-| `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. |
-| `download [postId]` | Download one of your published videos (default: most recent). |
-| `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`) — `analytics --posts 5`. |
-| `drafts [account]` | List saved drafts. |
+| `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. `--query` filters, `--sort top` ranks. |
+| `download [postId]` | Download one of your published videos (default: most recent). `--all --limit 10 --out-dir ./clips` for bulk. |
+| `content [account]` | Posts + drafts in one call. |
+| `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`, CSV via `--export out.csv`). |
+| `drafts [account]` | List drafts; `--publish <id>` / `--delete <id>`. |
+| `delete <postId> --yes` | Delete a published post (safety catch required). |
+| `trending` | Trending hashtags from Explore (caption research). |
+| `hashtags <tag>` | Hashtag detail + related tags. |
+| `comments [account]` | Recent comments on your posts (best-effort). |
 | `batch <manifest>` | Post many videos from a JSON/CSV manifest. |
-| `doctor` | Check environment, browser, profiles, session. |
+| `config [key] [value]` | Get/set config (no args lists all). |
+| `new <name>` | Scaffold a `<name>.manifest.json` series template. |
+| `completion` | Print bash/zsh completion (`eval "$(captron completion)"`). |
+| `doctor` | Check environment, browser, ffmpeg, disk, profiles, session. |
 
 ### `post` options
 
 ```
--c, --caption <text>       Caption text
--t, --hashtags <tags>      Comma-separated hashtags (no # needed)
--s, --schedule <when>      Schedule: "YYYY-MM-DD HH:mm" | "tomorrow HH:mm" | "today HH:mm" | "+2h" | "+3d"
+-c, --caption <text>       Caption text (or --desc-file <path> for long captions)
+-t, --hashtags <tags>      Comma-separated hashtags (no # needed, deduped)
+-s, --schedule <when>      Schedule: "YYYY-MM-DD HH:mm" | "18:30" | "today 18:00" | "tomorrow 09:00" | "friday 18:00" | "+90m" | "+3d" | "in 2 hours"
 -v, --visibility <who>     everyone | friends | private
 -d, --draft                Save as draft instead of publishing
 --slideshow <paths>        Comma-separated image paths for a slideshow (up to 10). Overrides <video>.
---headless                 Run browser headless
---json                     Machine-readable output
--a, --account <name>       Account profile to use
+--allow-comments / --no-allow-comments      Toggle comments (default: TikTok default)
+--allow-duet / --no-allow-duet              Toggle duets
+--allow-stitch / --no-allow-stitch          Toggle stitches
+--cover <seconds>          Cover frame timestamp (best-effort)
+--timeout <seconds>        Give up after N seconds
+--dry-run                  Validate inputs without posting
+--headless                 Run browser headless (or CAPTRON_HEADLESS=1)
+--json                     Machine-readable output (or CAPTRON_JSON=1)
+-a, --account <name>       Account profile to use (or CAPTRON_ACCOUNT)
 ```
 
 ### Batch posting
@@ -74,7 +88,15 @@ captron batch ./manifest.json
 
 # CSV: video,caption,hashtags,schedule,visibility,draft
 captron batch ./manifest.csv --draft --delay 30 --max-per-day 4
+
+# Long runs: progress file + resume + shuffle + stop-on-error
+captron batch ./manifest.json --state ./progress.json --delay 20
+captron batch ./manifest.json --resume ./progress.json   # skips already-posted
+captron batch ./manifest.json --shuffle                  # random order
+captron batch ./manifest.json --stop-on-error             # default: continue past failures
 ```
+
+Manifest items also accept `allowComment`, `allowDuet`, `allowStitch` (`true`/`false`) and `cover` (seconds).
 
 Example `manifest.json`:
 
@@ -84,6 +106,29 @@ Example `manifest.json`:
   { "video": "./vid2.mp4", "caption": "Part 2", "schedule": "tomorrow 09:00" }
 ]
 ```
+
+## Research (for faceless creators)
+
+```bash
+captron trending --limit 20        # what's hot on Explore right now
+captron hashtags ai --limit 10     # view count + related tags for #ai
+captron posts --sort top --limit 5 # your best performers first
+captron analytics --days 28 --export metrics.csv --posts 5
+captron comments --limit 20        # who replied to you
+```
+
+## Environment
+
+| Variable | Effect |
+|---|---|
+| `CAPTRON_HOME` | Relocate all data (profiles + config). |
+| `CAPTRON_ACCOUNT` | Default account when `-a` is not passed. |
+| `CAPTRON_HEADLESS=1` | Same as `--headless`. |
+| `CAPTRON_JSON=1` | Same as `--json`. |
+| `CAPTRON_VERBOSE=1` | Same as `--verbose`. |
+| `CAPTRON_BROWSER_CHANNEL` | `chrome` (default), `chromium`, `msedge`, or `bundled`. |
+| `CAPTRON_CHROMIUM_PATH` | Explicit browser executable. |
+| `CAPTRON_LOCALE` / `CAPTRON_TIMEZONE` | Browser locale/timezone (defaults `en-US` / `Europe/Amsterdam`). |
 
 ## Sessions & multi-account
 

@@ -231,6 +231,93 @@ async function setVisibility(page, visibility) {
   return true;
 }
 
+/**
+ * Toggle post interaction switches (Allow comments / Duet / Stitch).
+ * Best-effort: TikTok renders these as checkboxes/switches with localized
+ * labels next to the caption editor. `want` uses true/false/null (null = keep).
+ * Returns { comments, duet, stitch } with true when the switch was set.
+ */
+async function setInteractionFlags(page, { allowComment, allowDuet, allowStitch } = {}) {
+  const out = { comments: false, duet: false, stitch: false };
+  const jobs = [
+    ['comments', allowComment, [/allow comment/i, /commentaar/i, /comentario/i, /commentaire/i, /kommentar/i, /评论/i, /コメント/i, /댓글/i]],
+    ['duet', allowDuet, [/duet/i, /duet/i]],
+    ['stitch', allowStitch, [/stitch/i, /steek/i, /pegar/i, /coller/i, /拼接/i, /スティッチ/i, /스티치/i]],
+  ];
+  for (const [key, want, patterns] of jobs) {
+    if (want == null) continue;
+    try {
+      const done = await page.evaluate(
+        ({ patterns, want }) => {
+          const res = patterns.map((p) => new RegExp(p.source, p.flags));
+          const els = Array.from(document.querySelectorAll('label, span, div'));
+          for (const el of els) {
+            const t = (el.textContent || '').trim();
+            if (!t || t.length > 60) continue;
+            if (!res.some((rx) => rx.test(t))) continue;
+            // the toggle is the nearby checkbox/switch or the label itself
+            const root = el.closest('label') || el.parentElement;
+            const toggle =
+              (root && root.querySelector('input[type="checkbox"], [role="switch"], [role="checkbox"]')) ||
+              el.querySelector('input[type="checkbox"], [role="switch"], [role="checkbox"]') ||
+              (el.matches('input[type="checkbox"]') ? el : null);
+            if (!toggle) continue;
+            const checked = toggle.checked != null ? toggle.checked : toggle.getAttribute('aria-checked') === 'true';
+            if (checked !== Boolean(want)) {
+              (toggle.closest('label') || toggle).click();
+              return 'toggled';
+            }
+            return 'already';
+          }
+          return null;
+        },
+        { patterns: patterns.map((rx) => ({ source: rx.source, flags: rx.flags })), want: Boolean(want) }
+      );
+      if (done) out[key] = true;
+      else verbose(`interaction toggle not found: ${key} (leaving default)`);
+    } catch (err) {
+      verbose(`setInteractionFlags ${key} failed: ${String(err.message).split('\n')[0]}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Best-effort cover-frame selection. Opens the Cover editor (if present),
+ * picks a frame near `seconds`, and confirms.
+ * `seconds` is a timestamp into the video; values <= 0 pick the first frame.
+ * Never throws — returns true when a cover edit was applied.
+ */
+async function setCoverFrame(page, seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return false;
+  const sec = Math.max(0, Number(seconds));
+  try {
+    const opened = await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('button, span, div'));
+      const btn = els.find((el) => /^(edit cover|cover bewerken|editar portada|modifier la couverture|cover bearbeiten|编辑封面|カバーを編集|표지 편집|cover)$/i.test((el.textContent || '').trim()) && el.tagName === 'BUTTON');
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+    if (!opened) { verbose('cover editor not found; keeping auto cover'); return false; }
+    await sleep(1500);
+    await page.evaluate((s) => {
+      const thumbs = Array.from(document.querySelectorAll('img, canvas, video'));
+      const t = thumbs[Math.min(thumbs.length - 1, Math.floor(s))];
+      if (t) t.click();
+    }, sec).catch(() => {});
+    await sleep(600);
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const save = btns.find((b) => /^(save|opslaan|guardar|enregistrer|speichern|保存|保存する|저장|confirm|bevestigen)$/i.test((b.textContent || '').trim()));
+      if (save) save.click();
+    }).catch(() => {});
+    return true;
+  } catch (err) {
+    verbose('setCoverFrame failed: ' + String(err.message).split('\n')[0]);
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Finalize: publish now / schedule / save draft
 // ---------------------------------------------------------------------------
@@ -553,7 +640,7 @@ async function configureSchedule(page, date) {
  * `slideshow` (array of image paths) switches the upload page to Photos mode
  * and uploads up to 10 images as a slideshow. Overrides `videoPath`.
  */
-async function performPost({ context, videoPath, slideshow, caption, schedule, visibility, saveDraft = false, onProgress } = {}) {
+async function performPost({ context, videoPath, slideshow, caption, schedule, visibility, saveDraft = false, onProgress, allowComment, allowDuet, allowStitch, cover } = {}) {
   const page = await context.newPage();
   installApiLog(page);
   try {
@@ -598,6 +685,15 @@ async function performPost({ context, videoPath, slideshow, caption, schedule, v
     if (visibility) {
       await setVisibility(page, visibility);
     }
+
+    if (allowComment != null || allowDuet != null || allowStitch != null) {
+      await setInteractionFlags(page, { allowComment, allowDuet, allowStitch });
+    }
+
+    if (cover != null) {
+      await setCoverFrame(page, Number(cover));
+    }
+
 
     let scheduledAt = null;
     if (schedule) {
@@ -646,6 +742,8 @@ module.exports = {
   waitForEditor,
   fillCaption,
   setVisibility,
+  setInteractionFlags,
+  setCoverFrame,
   openScheduler,
   configureSchedule,
   performPost,

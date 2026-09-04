@@ -10,10 +10,9 @@ Completely reverse engineer TikTok and develop a CLI (for agents) whose main use
 - Tests written and passing (44)
 - GitHub repo has regular commits and multiple merged PRs
 
-## Status
-active — core expandable; analytics, posts, download, batch, schedule all live-verified
+active — v0.3.0; post flags/cover, delete, trending/hashtags/comments, config/new/completion, bulk download, analytics CSV, resumable batch; 62 tests pass
 
-## Progress
+- v0.3.0 NEW: `delete --yes`, `trending`, `hashtags <tag>`, `comments`, `config`, `new <series>`, `completion`; post `--desc-file/--allow-*/--cover/--timeout/--dry-run`; posts `--query/--sort`; download `--all`; analytics `--export`; batch `--shuffle/--resume/--state/--stop-on-error`; doctor ffmpeg/disk/env (62/62 tests)
 - PR #4 OPEN (fix/analytics-handle): analytics @handle now resolved from content dashboard fallback (the /analytics tab doesn't render @profile links). `captron analytics --json` returns handle: sim_test_runs. CI running.
 - PR #3 MERGED (feat/summary): `captron posts` now uses item_list API (per-post stats + download URLs via playAddr from SSR JSON). `[scheduled YYYY-MM-DD HH:MM]` tag on scheduled posts. `--posts <n>` combined analytics+posts view in one session. Docs updated.
 - PR #2 MERGED (feat/analytics): `captron analytics [account] [--days 1|7|28|60] [--posts <n>]` — reverse-engineered /tiktok/v1/analytics/insights/ batch API (no signature needed), insight_type map from probing 1..160, 8 metrics w/ daily series, ranges 1/7/28/60; 10 unit tests
@@ -42,4 +41,4 @@ active — core expandable; analytics, posts, download, batch, schedule all live
 - `node bin/captron.js download` → real MP4 saved (ftypisom magic)
 - publish RPC: POST /tiktok/web/project/post/v1/ returns {projectId, itemId, statusCode:0}
 - repo: github.com/Lucas-vdr-a11y/tiktok-cli (main, feat/analytics, fix/analytics-handle)
-- 44/44 unit tests pass; CI matrix: node 20 + node 22
+- 62/62 unit tests pass; CI matrix: node 20 + node 22; `captron --help` lists 19 commands; v0.3.0

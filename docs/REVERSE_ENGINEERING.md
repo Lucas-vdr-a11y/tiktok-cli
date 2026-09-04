@@ -118,6 +118,44 @@ Key selectors:
 - `SELECTORS.photoTab` = `button[aria-label*="Photo" i], ...`
 - File input detection for photo mode: `el.accept` contains `image/` and `el.multiple === true`.
 
+## Interaction toggles + cover (post editor)
+
+Below the caption editor TikTok renders preference switches:
+`Allow comments`, `Allow Duet`, `Allow Stitch` (localized). They are
+`input[type="checkbox"]` / `[role="switch"]` elements inside a `label`
+whose text matches the patterns in `setInteractionFlags` (`src/upload.js`).
+Captron clicks the toggle only when the current state differs from the
+requested `--allow-*` / `--no-allow-*` flag — best-effort, never fatal.
+
+Cover selection (best-effort `setCoverFrame`): the editor has an
+`Edit cover` button opening a thumbnail strip. Captron clicks it, picks a
+thumbnail near `--cover <seconds>`, and confirms with Save. If the layout
+changed, the post still publishes with the automatic cover.
+
+## Hashtag research (Explore + tag pages)
+
+- `GET https://www.tiktok.com/explore` renders trending `/tag/<name>` anchors.
+  View counts appear as sibling text (`12.3M views`); `parseViewCount`
+  normalizes `K/M/B` suffixes (`src/trending.js`).
+- `GET https://www.tiktok.com/tag/<name>` embeds `__UNIVERSAL_DATA_FOR_REHYDRATION__`
+  with the canonical view/video count plus co-occurring `/tag/` links
+  (surfaced as `related`). No X-Bogus needed — plain navigation + DOM read.
+
+## Comments inbox (best-effort)
+
+Studio exposes comments at `/tiktokstudio/comments` (fallback `/tiktokstudio/inbox`).
+Rows are heuristic blocks: an `/@handle` link (not `/video/`) + 2+ text lines +
+optional `/video/<id>` link (`src/comments.js`). The layout moves often, so
+`listComments` returns `partial: true` when nothing matched instead of failing.
+
+## Deleting a post (UI only)
+
+There is no documented delete API. Captron opens the content dashboard,
+scrolls the `/video/<id>` card into view, opens its `More (⋯)` menu, clicks
+`Delete`, and confirms (`src/posts.js#deletePost`). Requires `--yes`.
+If TikTok renamed the menu, the command fails open with instructions to
+delete manually in Studio.
+
 ## Localization
 
 TikTok Studio localizes both labels and endpoints. Captron matches on stable attributes (input names, radio values) and falls back to a table of common labels in EN/NL/ES/FR/DE/PT/ZH/JA/KO. The schedule radio is `input[name="postSchedule"][value="schedule"]`; the publish button is the button whose text is one of `Post/Plaatsen/Publicar/Publier/...`.

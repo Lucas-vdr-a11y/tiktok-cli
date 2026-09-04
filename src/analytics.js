@@ -125,6 +125,21 @@ async function fetchInsights(page, types, dateRange) {
 }
 
 /**
+ * Serialize an analytics result to CSV (one row per metric per day).
+ * Columns: metric,date,value. Totals are emitted as date='total' rows.
+ */
+function analyticsToCsv(result) {
+  const { toCsv } = require('./utils');
+  const rows = [];
+  for (const [name, m] of Object.entries((result && result.metrics) || {})) {
+    if (!m) continue;
+    if (m.total != null) rows.push({ metric: name, date: 'total', value: m.total });
+    for (const p of m.series || []) rows.push({ metric: name, date: p.date, value: p.value });
+  }
+  return toCsv(rows, ['metric', 'date', 'value']);
+}
+
+/**
  * `captron analytics` — account-level metrics for the last N days.
  * With `posts > 0`, also returns the most recent posts with per-post stats
  * (from /tiktok/creator/manage/item_list/v1/) in the same session.
@@ -189,5 +204,5 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
   }
 }
 
-module.exports = { analytics, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
+module.exports = { analytics, analyticsToCsv, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
 
