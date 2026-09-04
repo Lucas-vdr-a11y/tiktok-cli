@@ -37,29 +37,65 @@ captron content          # lists posts + drafts
 
 | Command | What it does |
 |---|---|
-| `login [account]` | Log in via QR code. State persists in `~/.captron/profiles/<account>`. |
-| `logout [account]` | Clear a saved session. |
-| `whoami [account]` | Show session status + handle. |
-| `accounts` | List configured account profiles. |
-| `post <video> [options]` | Upload + caption + publish (or draft) in one action. |
-| `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. |
-| `download [postId]` | Download one of your published videos (default: most recent). |
-| `analytics [account]` | Account metrics (+ recent posts w/ stats) — `analytics --posts <n>`. |
-| `drafts [account]` | List saved drafts. |
-| `batch <manifest>` | Post many videos from a JSON/CSV manifest. |
-| `doctor` | Check environment, browser, profiles, session. |
+| `login [account]` | Log in via QR code, or `login --from seed.json` to import a browser session non-interactively. State persists in `~/.captron/profiles/<account>`. |
+| `accounts` | List profiles (`--remove <name> --yes` forgets one entirely). |
+| `use <account>` | Switch the active profile (instant, offline). |
+| `drafts` | List drafts (`--all` sweeps fleet-wide); `--publish <id>` / `--delete <id>`. |
+| `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--to a,b` / `--all` fans out to many accounts. `--retries 2` retries, `--auto-fit` normalizes first, `--strict` fails on warnings. |
+| `probe <file>` | Offline TikTok-readiness check (size, codec, duration, verdict). |
+| `fit <input> -o <out>` | Normalize to vertical 1080x1920 H.264/AAC via ffmpeg (offline). |
+| `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--since 2026-08-01`, `--export posts.csv`. `--all` sweeps every account. |
+| `analytics [account]` | Account metrics (`--posts <n>` recent posts, `--export out.csv`, viewer-activity via `best-time`). `--all` sweeps every account. |
+| `sync [account]` | One-session digest per account (`--out sync.json`). `--all` sweeps every account into one file. |
+| `content [account]` | Posts + drafts in one call. `--all` sweeps every account. |
+| `calendar [account]` | Scheduled queue grouped by day (`--days 14`). `--all` sweeps every account. |
+| `caption` | Offline caption builder (`--hook "..." --cta "..." -t tags --strict`). |
+| `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. `--all` sweeps every account. |
+| `hook` | Offline viral hook generator (`--niche ai|money|fitness|story|tech --count 5 --seed x`). |
+| `delete <postId> --yes` | Delete a published post (safety catch required). |
+| `trending` | Trending hashtags from Explore (caption research). |
+| `hashtags <tag>` | Hashtag detail + related tags. |
+| `comments [account]` | Recent comments on your posts (best-effort). `--all` sweeps every account. |
+| `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--probe` pre-flights, `--auto-fit` normalizes, `--retries 2` retries each item, `--strict` fails warned items. Per-item `"account"` mixes accounts. |
+| `clean [--dry-run]` | Free disk: prune disposable Chromium caches (sessions kept). |
+| `completion [shell]` | Shell completions for bash/zsh/fish, generated from live commands (`eval "$(captron completion bash)"`, `captron completion fish > ~/.config/fish/completions/captron.fish`). |
+| `doctor [--fix] [--offline]` | Check environment, browser, ffmpeg, disk, profile sizes, session + update check. `--fix` clears stale locks; `--offline` skips browsers (fast). |
+| `update [--check]` | Check npm for a newer captron (`--check` reports only). |
 
 ### `post` options
 
 ```
--c, --caption <text>       Caption text
--t, --hashtags <tags>      Comma-separated hashtags (no # needed)
--s, --schedule <when>      Schedule: "YYYY-MM-DD HH:mm" | "tomorrow HH:mm" | "today HH:mm" | "+2h" | "+3d"
+-c, --caption <text>       Caption text (or --desc-file <path> for long captions)
+-t, --hashtags <tags>      Comma-separated hashtags (no # needed, deduped)
+-s, --schedule <when>      Schedule: "YYYY-MM-DD HH:mm" | "18:30" | "today 18:00" | "tomorrow 09:00" | "friday 18:00" | "+90m" | "+3d" | "in 2 hours"
 -v, --visibility <who>     everyone | friends | private
 -d, --draft                Save as draft instead of publishing
---headless                 Run browser headless
---json                     Machine-readable output
--a, --account <name>       Account profile to use
+--slideshow <paths>        Comma-separated image paths for a slideshow (up to 10). Overrides <video>.
+--allow-comments / --no-allow-comments      Toggle comments (default: TikTok default)
+--allow-duet / --no-allow-duet              Toggle duets
+--allow-stitch / --no-allow-stitch          Toggle stitches
+--cover <seconds>          Cover frame timestamp (best-effort)
+--timeout <seconds>        Give up after N seconds
+--retries <n>              Retry failed posts up to N times
+--auto-fit                 Normalize landscape/odd codecs via `fit` before uploading (skips when already fitting)
+--strict                   Fail on warnings (long caption, large file) instead of posting
+--dry-run                  Validate inputs without posting
+--headless                 Run browser headless (or CAPTRON_HEADLESS=1)
+--json                     Machine-readable output (or CAPTRON_JSON=1)
+`post` auto-runs `probe` on the video first (duration/codec warnings are
+advisory unless `--strict`).
+
+Scheduling window: TikTok Studio needs ~20 min lead and allows ~10 days
+max — out-of-window schedules warn (and fail under `--strict`).
+
+### Media prep (offline, before posting)
+
+```bash
+captron probe ./clip.mp4        # verdict: fits TikTok? codec/duration/size issues?
+captron fit ./clip.mp4 -o ./ready.mp4   # vertical 1080x1920 H.264/AAC + faststart
+captron post ./ready.mp4 --strict       # refuse to post when anything warns
+captron batch ./manifest.json --probe --dry-run   # pre-flight every video, print warnings
+captron doctor --fix                    # clear stale Chromium locks ("profile in use")
 ```
 
 ### Batch posting
@@ -72,7 +108,15 @@ captron batch ./manifest.json
 
 # CSV: video,caption,hashtags,schedule,visibility,draft
 captron batch ./manifest.csv --draft --delay 30 --max-per-day 4
+
+# Long runs: progress file + resume + shuffle + stop-on-error
+captron batch ./manifest.json --state ./progress.json --delay 20
+captron batch ./manifest.json --resume ./progress.json   # skips already-posted
+captron batch ./manifest.json --shuffle                  # random order
+captron batch ./manifest.json --stop-on-error             # default: continue past failures
 ```
+
+Manifest items also accept `allowComment`, `allowDuet`, `allowStitch` (`true`/`false`) and `cover` (seconds).
 
 Example `manifest.json`:
 
@@ -83,15 +127,85 @@ Example `manifest.json`:
 ]
 ```
 
+## Research (for faceless creators)
+
+```bash
+captron hook --niche money --count 5 --seed ep1   # offline viral hooks for scripts
+captron caption --hook "POV: ..." -t ai,fyp       # length-checked caption
+captron trending --limit 20        # what's hot on Explore right now
+captron hashtags ai --limit 10     # view count + related tags for #ai
+captron posts --sort top --limit 5 # your best performers first
+captron calendar --days 14         # what's queued, by day
+captron analytics --days 28 --export metrics.csv --posts 5
+captron audit --limit 20           # totals, top/flops, caption gaps
+captron comments --limit 20        # who replied to you
+# ...or all three online reads in one browser session:
+captron sync --days 7 --limit 20 --comments 5 --out sync.json
+```
+
+## Environment
+
+| Variable | Effect |
+|---|---|
+| `CAPTRON_HOME` | Relocate all data (profiles + config). |
+| `CAPTRON_ACCOUNT` | Default account when `-a` is not passed. |
+| `CAPTRON_HEADLESS=1` | Same as `--headless`. |
+| `CAPTRON_JSON=1` | Same as `--json`. |
+| `CAPTRON_VERBOSE=1` | Same as `--verbose`. |
+| `CAPTRON_BROWSER_CHANNEL` | `chrome` (default), `chromium`, `msedge`, or `bundled`. |
+| `CAPTRON_CHROMIUM_PATH` | Explicit browser executable. |
+| `CAPTRON_LOCALE` / `CAPTRON_TIMEZONE` | Browser locale/timezone (defaults `en-US` / `Europe/Amsterdam`). |
+
 ## Sessions & multi-account
 
 Each account gets its own persistent browser profile (cookies + localStorage) under `~/.captron/profiles/<name>`. Log in once and reuse. Use `CAPTRON_HOME` to relocate all data.
+
+```bash
+captron login alice            # QR login per account
+captron login bob --from seed.json   # or import a session non-interactively
+captron accounts               # list profiles (* = active)
+captron use alice              # switch active profile (instant, offline)
+captron whoami --all          # session status for every profile
+captron accounts --remove oldname --yes   # forget a profile (dir + entry gone)
+CAPTRON_ACCOUNT=bob captron post ./v.mp4   # one-off without switching
+```
+
+One video, many accounts (sequential fan-out — one browser launch at a time):
+
+```bash
+captron post ./v.mp4 --to alice,bob --caption "Out everywhere" --hashtags "fyp"
+captron post ./v.mp4 --all --draft        # draft everywhere, publish later
+captron post ./v.mp4 --all --dry-run      # preview the target list
+```
+
+Per-item accounts in batch manifests (`"account": "alice"` per row) mix
+different videos across accounts in a single run.
+
+Fleet reads — one command across every profile (sequential by default,
+per-account results; a broken profile reports its error instead of killing
+the sweep). Add `--jobs <n>` anywhere to run accounts in parallel
+(`captron sync --all --jobs 3`, `CAPTRON_JOBS=3` works too) — results keep
+account order. Posting fans out the same way (`post --to a,b --jobs 2`).
+
+```bash
+captron whoami --all
+captron posts --all --sort top --limit 5
+captron content --all                      # posts + drafts everywhere
+captron calendar --all --days 14           # queues everywhere
+captron comments --all                     # inboxes everywhere
+captron analytics --all --days 28 --export metrics.csv   # metrics-alice.csv, metrics-bob.csv…
+captron audit --all                        # health per account
+captron sync --all --out fleet.json
+captron logout --all
+```
 
 Import an existing browser session (e.g. from a manual Chrome login) with:
 
 ```bash
 node -e "require('fs').writeFileSync('/tmp/seed.json', JSON.stringify({cookies: [...], localStorage: {...}}))"
 node scripts/seed-session.js /tmp/seed.json my-account
+# ...or the built-in importer:
+captron login my-account --from /tmp/seed.json
 ```
 
 ## Reverse-engineering notes
