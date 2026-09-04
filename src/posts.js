@@ -190,11 +190,24 @@ async function deletePost({ account = 'main', postId, headless = false, yes = fa
     await context.close().catch(() => {});
   }
 }
+/**
+ * Account health summary over normalized post items (pure, tested).
+ * Powers `captron audit` for one account or a whole fleet sweep.
+ */
+function summarizePosts(items) {
+  const list = (items || []).filter((it) => it && typeof it === 'object');
+  const sum = (f) => list.reduce((a, it) => a + ((it.stats && it.stats[f]) || 0), 0);
+  const avg = (f) => (list.length ? Math.round(sum(f) / list.length) : 0);
+  const top = [...list].sort((a, b) => ((b.stats && b.stats.views) || 0) - ((a.stats && a.stats.views) || 0)).slice(0, 3);
+  const flops = [...list].sort((a, b) => ((a.stats && a.stats.views) || 0) - ((b.stats && b.stats.views) || 0)).slice(0, 3).filter((it) => ((it.stats && it.stats.views) || 0) < avg('views'));
+  const noCaption = list.filter((it) => !(it.caption || '').trim());
+  return { scanned: list.length, totals: { views: sum('views'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares') }, averages: { views: avg('views'), likes: avg('likes') }, top: top.map((t) => t.id), flops: flops.map((t) => t.id), noCaption: noCaption.length };
+}
 
 /**
  * Downloading lives in `download.js` (`captron download [postId]`) — it captures
  * the video stream the Studio grid plays, because the pre-signed `download_info`
  * URLs can 403 for non-browser clients and the play-API URL needs session cookies.
  */
-module.exports = { listPostsApi, fetchItemPage, normalizeItem, filterPosts, deletePost };
+module.exports = { listPostsApi, fetchItemPage, normalizeItem, filterPosts, summarizePosts, deletePost };
 

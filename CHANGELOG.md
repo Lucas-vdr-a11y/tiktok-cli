@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0 — 2026-09-04
+
+Complete-the-sweep wave (105 tests pass).
+
+- `content --all` / `comments --all` / `calendar --all` / `audit --all` —
+  every read command now sweeps the fleet. Only truly per-account
+  (`download`, `drafts`, `config`, `new`) and public (`trending`,
+  `hashtags`) commands stay single-scope.
+- `posts.summarizePosts` — audit math extracted to a pure, tested,
+  null-tolerant helper; `audit` (single + sweep) reuses it.
+
+
 ## 0.11.0 — 2026-09-04
 
 Fleet-sweep wave (102 tests pass).

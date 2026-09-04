@@ -47,16 +47,16 @@ captron content          # lists posts + drafts
 | `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--since 2026-08-01`, `--export posts.csv`. `--all` sweeps every account. |
 | `analytics [account]` | Account metrics (`--posts <n>` recent posts, `--export out.csv`, viewer-activity via `best-time`). `--all` sweeps every account. |
 | `sync [account]` | One-session digest per account (`--out sync.json`). `--all` sweeps every account into one file. |
-| `calendar [account]` | Scheduled queue grouped by day (`--days 14`). |
+| `content [account]` | Posts + drafts in one call. `--all` sweeps every account. |
+| `calendar [account]` | Scheduled queue grouped by day (`--days 14`). `--all` sweeps every account. |
 | `caption` | Offline caption builder (`--hook "..." --cta "..." -t tags --strict`). |
-| `best-time [account]` | Best posting slots from viewer activity (`--days 28`). |
-| `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. |
+| `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. `--all` sweeps every account. |
 | `hook` | Offline viral hook generator (`--niche ai|money|fitness|story|tech --count 5 --seed x`). |
 | `drafts [account]` | List drafts; `--publish <id>` / `--delete <id>`. |
 | `delete <postId> --yes` | Delete a published post (safety catch required). |
 | `trending` | Trending hashtags from Explore (caption research). |
 | `hashtags <tag>` | Hashtag detail + related tags. |
-| `comments [account]` | Recent comments on your posts (best-effort). |
+| `comments [account]` | Recent comments on your posts (best-effort). `--all` sweeps every account. |
 | `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--probe` pre-flights, `--auto-fit` normalizes, `--retries 2` retries each item, `--strict` fails warned items. Per-item `"account"` mixes accounts. |
 | `clean [--dry-run]` | Free disk: prune disposable Chromium caches (sessions kept). |
 | `completion` | Print bash/zsh completion (`eval "$(captron completion)"`). |
@@ -187,7 +187,11 @@ results; a broken profile reports its error instead of killing the sweep):
 ```bash
 captron whoami --all
 captron posts --all --sort top --limit 5
+captron content --all                      # posts + drafts everywhere
+captron calendar --all --days 14           # queues everywhere
+captron comments --all                     # inboxes everywhere
 captron analytics --all --days 28 --export metrics.csv   # metrics-alice.csv, metrics-bob.csv…
+captron audit --all                        # health per account
 captron sync --all --out fleet.json
 captron logout --all
 ```

@@ -429,8 +429,23 @@ function buildProgram() {
     .command('content [account]')
     .description('List published posts AND saved drafts in one call.')
     .option('--limit <n>', 'max posts', '20')
+    .option('--all', 'sweep every known account (sequential)')
     .action(async (account, opts) => {
       applyGlobals();
+      if (opts.all) {
+        const swept = await auth.sweepAccounts((name) => contentLib.listContent({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const okCount = swept.filter((r) => r.ok).length;
+        printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept }, (r) => {
+          const lines = ['Content sweep (' + r.okCount + '/' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (!a.ok) { lines.push('  ✖ ' + a.account + '  ' + (a.error || 'failed')); continue; }
+            lines.push('  @' + (a.handle || a.account) + '  ' + a.posts.items.length + ' posts · ' + a.drafts.items.length + ' drafts');
+          }
+          return lines.join('\n');
+        });
+        if (okCount !== swept.length) process.exit(1);
+        return;
+      }
       const res = await contentLib.listContent({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
       printResult(res, (r) => {
         const lines = ['Content on @' + (r.handle || r.account || '?') + ':'];
@@ -627,18 +642,28 @@ function buildProgram() {
     .command('audit [account]')
     .description('Account health check: totals, averages, top + flop posts.')
     .option('--limit <n>', 'posts to scan', '20')
+    .option('--all', 'sweep every known account (sequential)')
     .action(async (account, opts) => {
       applyGlobals();
-      const { listPostsApi } = require('./posts');
+      const { listPostsApi, summarizePosts } = require('./posts');
+      if (opts.all) {
+        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const rows = swept.map((r) => (r.ok ? { ok: true, account: r.account, handle: r.handle, ...summarizePosts(r.items) } : r));
+        const okCount = rows.filter((r) => r.ok).length;
+        printResult({ ok: okCount === rows.length, okCount, total: rows.length, accounts: rows }, (r) => {
+          const lines = ['Audit sweep (' + r.okCount + '/' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (!a.ok) { lines.push('  ✖ ' + a.account + '  ' + (a.error || 'failed')); continue; }
+            lines.push('  @' + (a.handle || a.account) + '  ' + a.totals.views + ' views · ' + a.averages.views + '/post · top ' + (a.top[0] || '—'));
+          }
+          return lines.join('\n');
+        });
+        if (okCount !== rows.length) process.exit(1);
+        return;
+      }
       const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
       if (!res.ok) { printResult(res, (r) => 'Audit failed: ' + r.error); process.exit(1); }
-      const items = res.items;
-      const sum = (f) => items.reduce((a, it) => a + ((it.stats && it.stats[f]) || 0), 0);
-      const avg = (f) => (items.length ? Math.round(sum(f) / items.length) : 0);
-      const top = [...items].sort((a, b) => b.stats.views - a.stats.views).slice(0, 3);
-      const flops = [...items].sort((a, b) => a.stats.views - b.stats.views).slice(0, 3).filter((it) => it.stats.views < avg('views'));
-      const noCaption = items.filter((it) => !(it.caption || '').trim());
-      const out = { ok: true, account: res.account, handle: res.handle, scanned: items.length, totals: { views: sum('views'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares') }, averages: { views: avg('views'), likes: avg('likes') }, top: top.map((t) => t.id), flops: flops.map((t) => t.id), noCaption: noCaption.length };
+      const out = { ok: true, account: res.account, handle: res.handle, ...summarizePosts(res.items) };
       printResult(out, (r) => {
         const lines = ['Audit @' + (r.handle || r.account) + ' (' + r.scanned + ' posts):', '  totals:   ' + r.totals.views + ' views · ' + r.totals.likes + ' likes · ' + r.totals.comments + ' comments', '  averages: ' + r.averages.views + ' views/post', '  top:      ' + (r.top.join(', ') || '—'), '  flops:    ' + (r.flops.join(', ') || '—') + (r.noCaption ? '   (' + r.noCaption + ' posts have no caption!)' : '')];
         return lines.join('\n');
@@ -719,9 +744,25 @@ function buildProgram() {
     .command('comments [account]')
     .description('Recent comments on your posts (best-effort inbox scrape).')
     .option('--limit <n>', 'max comments', '20')
+    .option('--all', 'sweep every known account (sequential)')
     .action(async (account, opts) => {
       applyGlobals();
       const { listComments } = require('./comments');
+      if (opts.all) {
+        const swept = await auth.sweepAccounts((name) => listComments({ account: name, limit: Number(opts.limit), headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const okCount = swept.filter((r) => r.ok).length;
+        printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept }, (r) => {
+          const lines = ['Comments sweep (' + r.okCount + '/' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (!a.ok) { lines.push('  ✖ ' + a.account + '  ' + (a.error || 'failed')); continue; }
+            lines.push('  @' + (a.account || '?') + '  ' + a.items.length + ' comments' + (a.partial ? ' (partial)' : ''));
+            for (const c of (a.items || []).slice(0, 3)) lines.push('    @' + (c.author || '?') + ': ' + (c.text || '').slice(0, 80));
+          }
+          return lines.join('\n');
+        });
+        if (okCount !== swept.length) process.exit(1);
+        return;
+      }
       const res = await listComments({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
       printResult(res, (r) => {
         const lines = ['Comments (' + r.items.length + '):'];
@@ -1005,9 +1046,27 @@ function buildProgram() {
     .description('Scheduled posts grouped by day (next N days queue view).')
     .option('--days <n>', 'lookahead window', '14')
     .option('--limit <n>', 'posts to scan', '50')
+    .option('--all', 'sweep every known account (sequential)')
     .action(async (account, opts) => {
       applyGlobals();
       const { listPostsApi } = require('./posts');
+      const { groupScheduled } = require('./sync');
+      if (opts.all) {
+        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, limit: Number(opts.limit), scheduledOnly: true, headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const okCount = swept.filter((r) => r.ok).length;
+        printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept.map((r) => (r.ok ? { ok: true, account: r.account, handle: r.handle, queue: groupScheduled(r.items, Number(opts.days) || 14).groups } : r)) }, (r) => {
+          const lines = ['Queue sweep (' + r.okCount + '/' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (!a.ok) { lines.push('  ✖ ' + a.account + '  ' + (a.error || 'failed')); continue; }
+            const n = a.queue.reduce((s, g) => s + g.items.length, 0);
+            lines.push('  @' + (a.handle || a.account) + '  ' + n + ' scheduled:');
+            for (const g of a.queue) lines.push('    ' + g.day + ' (' + g.items.length + ')');
+          }
+          return lines.join('\n');
+        });
+        if (okCount !== swept.length) process.exit(1);
+        return;
+      }
       const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), scheduledOnly: true, headless: globalOptions.headless });
       printResult(res, (r) => {
         const { groupScheduled } = require('./sync');
