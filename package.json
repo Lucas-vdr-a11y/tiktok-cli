@@ -1,6 +1,6 @@
 {
   "name": "captron",
-  "version": "0.2.0",
+  "version": "0.9.0",
   "description": "Post TikTok videos from the command line — built for AI agents and automated faceless TikTok creators. Reverse-engineered TikTok web upload flow, driven through a real browser session.",
   "type": "commonjs",
   "bin": {

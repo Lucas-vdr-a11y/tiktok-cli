@@ -149,4 +149,82 @@ function accounts() {
   };
 }
 
-module.exports = { isLoggedIn, login, logout, whoami, accounts };
+/**
+ * `captron use <account>` — switch the active profile (no browser needed).
+ * Creates the profile dir lazily so the next login/post just works.
+ */
+function useAccount(name) {
+  const { ensureHome } = require('./utils');
+  if (!name || !String(name).trim()) return { ok: false, error: 'missing account name (usage: captron use <account>)' };
+  const account = String(name).trim();
+  ensureHome();
+  const cfg = readConfig();
+  if (!(cfg.accounts || []).some((a) => a.name === account)) {
+    cfg.accounts = [...(cfg.accounts || []), { name: account, profileDir: profileDir(account), handle: null, loginAt: null }];
+  }
+  cfg.activeAccount = account;
+  writeConfig(cfg);
+  return { ok: true, account, activeAccount: account };
+}
+
+/**
+ * Import a session exported from another browser into a captron profile.
+ * Accepts `{ cookies: [...], localStorage: {...} }` or a bare cookie array.
+ * Same format as `scripts/seed-session.js`. Returns { ok, account, cookies }.
+ */
+async function importSession({ account = 'main', file } = {}) {
+  const fs = require('fs');
+  const path = require('path');
+  if (!file) return { ok: false, error: 'missing --from <seed.json>' };
+  let seed;
+  try {
+    seed = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
+  } catch (err) {
+    return { ok: false, error: 'could not read ' + file + ': ' + err.message };
+  }
+  const rawCookies = Array.isArray(seed) ? seed : seed.cookies || [];
+  const cookies = rawCookies
+    .filter((c) => c && c.name && c.value)
+    .map((c) => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain,
+      path: c.path || '/',
+      expires: c.expires === undefined ? -1 : Math.min(2147483647, c.expires || Math.floor(Date.now() / 1000) + 60 * 60 * 24),
+      httpOnly: Boolean(c.httpOnly),
+      secure: Boolean(c.secure),
+      sameSite: ['Strict', 'Lax', 'None'].includes(c.sameSite) ? c.sameSite : 'Lax',
+    }));
+  if (!cookies.length) return { ok: false, error: 'no cookies in ' + file };
+  const context = await launchProfile({ account, headless: true });
+  try {
+    await context.addCookies(cookies);
+    const page = await context.newPage();
+    await page.goto('https://www.tiktok.com', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    const ls = seed.localStorage || {};
+    if (ls && typeof ls === 'object') {
+      await page.evaluate((obj) => {
+        for (const k of Object.keys(obj)) {
+          try { localStorage.setItem(k, obj[k]); } catch (_) {}
+        }
+      }, ls).catch(() => {});
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await sleep(2500);
+    }
+    const loggedIn = await isLoggedIn(context);
+    let handle = null;
+    if (loggedIn) {
+      await page.goto(URLS.creatorCenter, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      await sleep(2500);
+      handle = await resolveHandle(page).catch(() => null);
+      await persistSession(context, account, handle);
+    }
+    return loggedIn
+      ? { ok: true, account, cookies: cookies.length, handle: handle ? handle.replace(/^\/@?/, '') : null }
+      : { ok: false, error: 'cookies imported but session is not logged in (expired?)', account, cookies: cookies.length };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+module.exports = { isLoggedIn, login, logout, whoami, accounts, useAccount, importSession };
