@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0 — 2026-09-04
+
+Pre-flight + fast doctor wave (87 tests pass).
+
+- `batch --probe` — pre-flights every video (codec/duration via ffprobe)
+  into plan warnings: visible in `--dry-run`, fatal under `--strict`.
+  Catches corrupt files before a 10-minute upload dies server-side.
+- `doctor --offline` — fully offline check (~instant): skips browser
+  launches and session probe for CI/containers.
+- `doctor` now reports installed vs latest npm version (4s-timeout
+  advisory check) so agents notice updates.
+- `probe` warning is honest now: distinguishes "ffprobe missing" from
+  "media streams unreadable (corrupt/partial/fake extension)".
+
 ## 0.7.0 — 2026-09-04
 
 Care + timing wave (83 tests pass).

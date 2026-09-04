@@ -381,6 +381,7 @@ function buildProgram() {
     .option('-d, --draft', 'save every item as draft instead of publishing')
     .option('--delay <seconds>', 'seconds to wait between posts', '0')
     .option('--jitter <seconds>', 'random extra delay 0..N between posts (rate-limit friendly)', '0')
+    .option('--probe', 'pre-flight: probe every video for codec/duration issues (offline)')
     .option('--max-per-day <n>', 'hard cap on posts per run', '0')
     .option('--dry-run', 'validate the manifest and print the plan without posting')
     .option('--strict', 'fail manifests with validation warnings')
@@ -396,6 +397,7 @@ function buildProgram() {
         defaultDraft: opts.draft || false,
         delaySec: Number(opts.delay),
         jitterSec: Number(opts.jitter),
+        probe: Boolean(opts.probe),
         strict: Boolean(opts.strict),
         dryRun: opts.dryRun || false,
         headless: globalOptions.headless,
@@ -684,6 +686,7 @@ function buildProgram() {
     .command('doctor')
     .description('Check environment: node, browser engines, ffmpeg, disk, profiles, session state.')
     .option('--fix', 'remove stale Chromium lock files from profiles')
+    .option('--offline', 'skip browser launches and session check (fast, fully offline)')
     .action(async (opts) => {
       applyGlobals();
       if (opts.fix) {
@@ -713,6 +716,7 @@ function buildProgram() {
         info.profiles = fs.readdirSync(utils.profilesDir()).map((d) => ({ name: d }));
       } catch (err) {}
       // Detect browser availability without launching a full session.
+      if (!opts.offline) {
       for (const channel of ['chromium', 'chrome']) {
         try {
           const b = await chromium.launch({ headless: true, channel: channel === 'chrome' ? 'chrome' : undefined });
@@ -722,6 +726,10 @@ function buildProgram() {
         } catch (err) {
           info.browsers[channel] = 'unavailable';
         }
+      }
+      } else {
+        info.browsers.chromium = 'skipped (--offline)';
+        info.browsers.chrome = 'skipped (--offline)';
       }
       try {
         const v = execSync('ffmpeg -version', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n')[0];
@@ -735,6 +743,7 @@ function buildProgram() {
         const { profileSizes } = require('./maintain');
         info.sizes = profileSizes();
       } catch (_) { info.sizes = []; }
+      if (!opts.offline) {
       try {
         const context = await browserMod.launchProfile({ account: globalOptions.account || 'main', headless: true });
         info.loggedIn = await auth.isLoggedIn(context);
@@ -742,6 +751,24 @@ function buildProgram() {
       } catch (err) {
         info.sessionError = String(err.message).split('\n')[0];
       }
+      } else {
+        info.loggedIn = 'skipped (--offline)';
+      }
+      try {
+        const local = require('../package.json').version;
+        info.version = local;
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch('https://registry.npmjs.org/captron/latest', { signal: ctrl.signal }).catch(() => null);
+        clearTimeout(t);
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data && data.version) {
+            info.latest = data.version;
+            info.update = data.version !== local ? 'update available: npm i -g captron@' + data.version : 'up to date';
+          }
+        }
+      } catch (_) { /* version check is advisory */ }
       printResult(info, (r) => {
         const lines = ['doctor:'];
         lines.push('  node:         ' + r.node);
@@ -752,9 +779,9 @@ function buildProgram() {
         if (r.disk) lines.push('  disk:        ' + r.disk);
         lines.push('  profiles:     ' + (r.profiles.length ? r.profiles.map((p) => p.name).join(', ') : '(none yet — run `captron login`)'));
         if (r.sizes && r.sizes.length) lines.push('  sizes:        ' + r.sizes.map((s) => s.name + ' ' + s.human).join(', ') + '  (free with `captron clean`)');
-        lines.push('  logged in:    ' + (r.loggedIn ? 'yes' : 'NO'));
+        lines.push('  logged in:    ' + (r.loggedIn === true ? 'yes' : r.loggedIn === 'skipped (--offline)' ? 'skipped (--offline)' : 'NO'));
         if (r.sessionError) lines.push('  session err:  ' + r.sessionError);
-        lines.push('  env:          ' + Object.entries(r.env).map(([k, v]) => k + '=' + (v || '—')).join(' '));
+        if (r.version) lines.push('  version:      captron ' + r.version + (r.latest ? ' (latest ' + r.latest + ' — ' + r.update + ')' : ''));
         return lines.join('\n');
       });
     });

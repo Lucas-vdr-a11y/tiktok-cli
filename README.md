@@ -60,12 +60,12 @@ captron content          # lists posts + drafts
 | `trending` | Trending hashtags from Explore (caption research). |
 | `hashtags <tag>` | Hashtag detail + related tags. |
 | `comments [account]` | Recent comments on your posts (best-effort). |
-| `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--strict` fails warned items. |
+| `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--probe` pre-flights media, `--strict` fails warned items. |
 | `config [key] [value]` | Get/set config (no args lists all). |
 | `new <name>` | Scaffold a `<name>.manifest.json` series template (`--count 5 --niche money --seed x` fills hook captions). |
 | `clean [--dry-run]` | Free disk: prune disposable Chromium caches (sessions kept). |
 | `completion` | Print bash/zsh completion (`eval "$(captron completion)"`). |
-| `doctor [--fix]` | Check environment, browser, ffmpeg, disk, profile sizes, session. `--fix` clears stale Chromium locks. |
+| `doctor [--fix] [--offline]` | Check environment, browser, ffmpeg, disk, profile sizes, session + update check. `--fix` clears stale locks; `--offline` skips browsers (fast). |
 
 ### `post` options
 
@@ -98,6 +98,7 @@ max — out-of-window schedules warn (and fail under `--strict`).
 captron probe ./clip.mp4        # verdict: fits TikTok? codec/duration/size issues?
 captron fit ./clip.mp4 -o ./ready.mp4   # vertical 1080x1920 H.264/AAC + faststart
 captron post ./ready.mp4 --strict       # refuse to post when anything warns
+captron batch ./manifest.json --probe --dry-run   # pre-flight every video, print warnings
 captron doctor --fix                    # clear stale Chromium locks ("profile in use")
 ```
 

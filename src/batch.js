@@ -78,7 +78,7 @@ function validateSpec(s, scheduleDate) {
 }
 
 /** Run a batch: post every spec, respecting per-account sessions + delay. */
-async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, jitterSec = 0, strict = false, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
+async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, jitterSec = 0, strict = false, probe = false, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
   let specs = parseManifest(manifest);
   if (shuffle) {
     for (let i = specs.length - 1; i > 0; i--) {
@@ -88,6 +88,16 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
     specs.forEach((s, i) => (s.index = i));
   }
   let plan = buildPlan(specs, { defaultAccount, defaultDraft });
+  if (probe) {
+    const { probeFile } = require('./media');
+    for (const p of plan) {
+      if (!p.video || p.errors.some((e) => e.includes('video'))) continue;
+      try {
+        const pr = probeFile(p.video);
+        if (pr && pr.warnings && pr.warnings.length) p.warnings.push(...pr.warnings);
+      } catch (_) { /* advisory only */ }
+    }
+  }
   if (strict) {
     for (const p of plan) {
       if (p.warnings && p.warnings.length) p.errors.push('strict: ' + p.warnings.join('; '));

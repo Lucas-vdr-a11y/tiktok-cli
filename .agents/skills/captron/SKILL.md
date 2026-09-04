@@ -41,10 +41,10 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron trending --limit 20` — trending hashtags (caption research)
 - `captron hashtags <tag>` — hashtag detail + related tags
 - `captron comments --limit 20` — recent comments (best-effort)
-- `captron batch <manifest> [--delay 20 --jitter 8 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many (JSON/CSV)
+- `captron batch <manifest> [--delay 20 --jitter 8 --probe --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many (JSON/CSV); `--probe` pre-flights every video offline
 - `captron config [key] [value]` — get/set config; `captron new <series> [--niche money --seed x]` scaffolds a manifest (hooks as captions with --niche)
 - `captron clean [--dry-run]` — free disk: prune Chromium caches (sessions kept)
-- `captron doctor [--fix]` — environment check (now with profile sizes); `--fix` clears stale Chromium locks
+- `captron doctor [--fix] [--offline]` — environment check (profile sizes + npm update check); `--fix` clears locks, `--offline` skips browsers
 
 ## Key options for `post`
 

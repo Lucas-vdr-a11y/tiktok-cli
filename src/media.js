@@ -80,8 +80,10 @@ function probeFile(file) {
         if (durationSec > 600) warnings.push('very long (' + durationSec + 's); TikTok web prefers ≤10 min');
       }
       if (width && height && height > 0 && width / height > 1.2) warnings.push('landscape ' + width + 'x' + height + ' — vertical 1080x1920 performs better (`captron fit`)');
-    } else {
+    } else if (!ffmpegAvailable().ok) {
       warnings.push('ffprobe unavailable — install ffmpeg for duration/codec checks');
+    } else {
+      warnings.push('could not read media streams (file may be corrupt, partial, or a fake extension) — upload may fail');
     }
   }
   return {
