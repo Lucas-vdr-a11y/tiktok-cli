@@ -45,9 +45,11 @@ captron content          # lists posts + drafts
 | `post <video> --slideshow <paths>` | Upload a slideshow of images (comma-separated, up to 10). |
 | `probe <file>` | Offline TikTok-readiness check (size, codec, duration, verdict). |
 | `fit <input> -o <out>` | Normalize to vertical 1080x1920 H.264/AAC via ffmpeg (offline). |
-| `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--export posts.csv`. |
 | `download [postId]` | Download one of your published videos (default: most recent). `--all --limit 10 --out-dir ./clips` for bulk. |
 | `content [account]` | Posts + drafts in one call. |
+| `sync [account]` | One-session digest: posts + analytics + comments snapshot (`--days 7 --limit 20 --comments 5 --out sync.json`). Replaces 3 browser launches with 1. |
+| `calendar [account]` | Scheduled queue grouped by day (`--days 14`). |
+| `caption` | Offline caption builder (`--hook "..." --cta "..." -t tags --strict`). |
 | `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`, CSV via `--export out.csv`). |
 | `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. |
 | `hook` | Offline viral hook generator (`--niche ai|money|fitness|story|tech --count 5 --seed x`). |
@@ -83,6 +85,9 @@ captron content          # lists posts + drafts
 --json                     Machine-readable output (or CAPTRON_JSON=1)
 -a, --account <name>       Account profile to use (or CAPTRON_ACCOUNT)
 ```
+
+`post` auto-runs `probe` on the video first (duration/codec warnings are
+advisory unless `--strict`).
 
 ### Media prep (offline, before posting)
 
@@ -126,13 +131,16 @@ Example `manifest.json`:
 
 ```bash
 captron hook --niche money --count 5 --seed ep1   # offline viral hooks for scripts
+captron caption --hook "POV: ..." -t ai,fyp       # length-checked caption
 captron trending --limit 20        # what's hot on Explore right now
 captron hashtags ai --limit 10     # view count + related tags for #ai
 captron posts --sort top --limit 5 # your best performers first
-captron posts --scheduled          # what's queued
+captron calendar --days 14         # what's queued, by day
 captron analytics --days 28 --export metrics.csv --posts 5
 captron audit --limit 20           # totals, top/flops, caption gaps
 captron comments --limit 20        # who replied to you
+# ...or all three online reads in one browser session:
+captron sync --days 7 --limit 20 --comments 5 --out sync.json
 ```
 
 ## Environment

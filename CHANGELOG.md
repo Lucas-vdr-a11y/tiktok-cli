@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 — 2026-09-04
+
+One-session sync wave (77 tests pass).
+
+- `sync` — posts + analytics metrics + recent comments in ONE browser
+  session (`--days/--limit/--comments/--out sync.json`). Replaces three
+  launches for the daily agent digest; shares `fetchInsights`,
+  `fetchItemPage`, and a newly extracted `openInbox/scrapeCommentRows`.
+- `calendar` — scheduled queue grouped by day (`--days 14`), powered by
+  a pure tested `groupScheduled` helper.
+- `caption` — offline caption builder (`--hook/--cta/-t/--strict`).
+- `post` auto-runs `probe` on the video first: duration/codec hints
+  surface as warnings (hard errors only under `--strict`).
+
 ## 0.5.0 — 2026-09-04
 
 Media prep + strictness wave (73 tests pass).

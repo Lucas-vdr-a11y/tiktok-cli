@@ -60,6 +60,16 @@ async function runPost(videoArg, opts) {
       process.exit(1);
     }
     if (vcheck.warning) utils.warn(vcheck.warning);
+    // Offline media probe (fast): codec/duration hints before the upload.
+    try {
+      const { probeFile } = require('./media');
+      const probe = probeFile(vcheck.path);
+      if (probe && probe.ok) {
+        vcheck.probe = probe;
+        if (probe.durationSec != null) utils.step('Duration: ' + probe.durationSec + 's' + (probe.width ? ' (' + probe.width + 'x' + probe.height + ')' : ''));
+        for (const w of probe.warnings || []) utils.warn(w);
+      }
+    } catch (_) { /* probe is advisory only */ }
   }
   let scheduleDate = parseSchedule(opts.schedule);
   if (opts.schedule && !scheduleDate) {
@@ -72,7 +82,7 @@ async function runPost(videoArg, opts) {
   }
   const { text: caption, warnings } = buildCaptionDetailed({ caption: captionOpt, hashtags: opts.hashtags });
   for (const w of warnings) utils.warn(w);
-  const strictWarnings = [...warnings, ...((!isSlideshow && vcheck && vcheck.warning) ? [vcheck.warning] : [])];
+  const strictWarnings = [...warnings, ...((!isSlideshow && vcheck && vcheck.warning) ? [vcheck.warning] : []), ...((!isSlideshow && vcheck && vcheck.probe && vcheck.probe.warnings) ? vcheck.probe.warnings : [])];
   if (opts.strict && strictWarnings.length) {
     utils.fail('Strict mode: ' + strictWarnings.join('; '));
     process.exit(1);
@@ -570,7 +580,6 @@ function buildProgram() {
       const items = [];
       for (let i = 1; i <= n; i++) items.push({ video: './ep' + i + '.mp4', caption: name + ' — part ' + i, hashtags: 'series,faceless,fyp', visibility: 'everyone' });
       const file = name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase() + '.manifest.json';
-      fs.writeFileSync(file, JSON.stringify(items, null, 2));
       printResult({ ok: true, file, count: n }, (r) => 'Wrote ' + r.file + ' (' + r.count + ' episodes). Edit captions, then `captron batch ' + r.file + ' --dry-run`.');
     });
 
@@ -581,7 +590,7 @@ function buildProgram() {
       const script = [
         '# captron completion (bash + zsh)',
         '# usage: eval "$(captron completion)"',
-        '_captron_cmds="login logout whoami accounts post probe fit posts content analytics audit hook download drafts batch delete trending hashtags comments config new doctor completion"',
+        '_captron_cmds="login logout whoami accounts post probe fit posts content sync calendar caption analytics audit hook download drafts batch delete trending hashtags comments config new doctor completion"',
         'if [ -n "$BASH_VERSION" ]; then',
         '  _captron() { local cur="${COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "$_captron_cmds" -- "$cur")); }',
         '  complete -F _captron captron',
@@ -701,6 +710,82 @@ function buildProgram() {
         lines.push('  env:          ' + Object.entries(r.env).map(([k, v]) => k + '=' + (v || '—')).join(' '));
         return lines.join('\n');
       });
+    });
+
+  program
+    .command('sync [account]')
+    .description('One-session digest: posts + analytics + comments snapshot (daily agent cron).')
+    .option('-d, --days <n>', 'analytics range: 1, 7, 28 or 60', '7')
+    .option('--limit <n>', 'max posts', '20')
+    .option('--comments <n>', 'max comments', '5')
+    .option('--out <file>', 'write snapshot JSON to <file>', null)
+    .action(async (account, opts) => {
+      applyGlobals();
+      const { syncAccount } = require('./sync');
+      const res = await syncAccount({ account: account || globalOptions.account || 'main', days: Number(opts.days), limit: Number(opts.limit), commentsLimit: Number(opts.comments), headless: globalOptions.headless });
+      if (res.ok && opts.out) {
+        try {
+          require('fs').writeFileSync(opts.out, JSON.stringify(res, null, 2));
+          res.snapshot = opts.out;
+        } catch (err) { res.snapshotError = err.message; }
+      }
+      printResult(res, (r) => {
+        const lines = ['Sync @' + (r.handle || r.account || '?') + ' (' + r.syncedAt + '):'];
+        lines.push('  posts:    ' + (r.posts ? r.posts.length : 0) + ' (totals ' + (r.totals ? r.totals.views : '?') + ' views)');
+        lines.push('  metrics:  ' + Object.keys(r.metrics || {}).length + ' (last ' + r.range_days + 'd)');
+        lines.push('  comments: ' + (r.comments ? r.comments.length : 0));
+        if (r.snapshot) lines.push('  snapshot: ' + r.snapshot);
+        if (r.snapshotError) lines.push('  snapshot error: ' + r.snapshotError);
+        if (r.error) lines.push('  error: ' + r.error);
+        return lines.join('\n');
+      });
+      if (!res.ok) process.exit(1);
+    });
+
+  program
+    .command('calendar [account]')
+    .description('Scheduled posts grouped by day (next N days queue view).')
+    .option('--days <n>', 'lookahead window', '14')
+    .option('--limit <n>', 'posts to scan', '50')
+    .action(async (account, opts) => {
+      applyGlobals();
+      const { listPostsApi } = require('./posts');
+      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), scheduledOnly: true, headless: globalOptions.headless });
+      printResult(res, (r) => {
+        const { groupScheduled } = require('./sync');
+        const { days, groups, upcoming } = groupScheduled(r.items, Number(opts.days) || 14);
+        const lines = ['Queue @' + (r.handle || r.account || '?') + ' (next ' + days + 'd, ' + upcoming.length + ' scheduled):'];
+        for (const g of groups) {
+          lines.push('  ' + g.day + ':');
+          for (const it of g.items) {
+            const d = new Date(it.scheduledTime);
+            lines.push('    ' + d.toISOString().slice(11, 16) + '  ' + (it.caption || '(no caption)').slice(0, 44) + '  [' + it.id + ']');
+          }
+        }
+        if (!upcoming.length) lines.push('  (empty — schedule with `captron post --schedule "..."`)');
+        return lines.join('\n');
+      });
+      if (!res.ok) process.exit(1);
+    });
+
+  program
+    .command('caption')
+    .description('Build a TikTok caption offline (hook + CTA + hashtags, length-checked).')
+    .option('--hook <text>', 'hook line', null)
+    .option('--cta <text>', 'call to action', 'Follow for part 2')
+    .option('-t, --hashtags <tags>', 'comma-separated hashtags', 'fyp')
+    .option('--strict', 'exit 1 on length/hashtag warnings')
+    .action((opts) => {
+      applyGlobals();
+      const { hookCaption } = require('./hooks');
+      const { buildCaptionDetailed } = utils;
+      const text = hookCaption({ hook: opts.hook || '', hashtags: opts.hashtags, cta: opts.cta });
+      const { warnings } = buildCaptionDetailed({ caption: (opts.hook || '') + (opts.cta ? '\n' + opts.cta : ''), hashtags: opts.hashtags });
+      if (opts.strict && warnings.length) {
+        printResult({ ok: false, error: warnings.join('; ') }, (r) => 'Caption invalid: ' + r.error);
+        process.exit(1);
+      }
+      printResult({ ok: true, caption: text, warnings }, (r) => r.caption + (r.warnings.length ? '\n  warnings: ' + r.warnings.join('; ') : ''));
     });
 
   return program;

@@ -28,6 +28,9 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron fit <input> -o <out>` — normalize to vertical 1080x1920 H.264/AAC via ffmpeg
 - `captron posts [account] --query <text> --sort top|liked --scheduled --export posts.csv` — posts with stats + download URLs
 - `captron content [account]` — posts + drafts in one call
+- `captron sync [account] --days 7 --limit 20 --comments 5 --out sync.json` — posts + analytics + comments in ONE browser session (daily digest)
+- `captron calendar --days 14` — scheduled queue grouped by day
+- `captron caption --hook "..." -t ai,fyp --strict` — offline caption builder
 - `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts in one call
 - `captron audit --limit 20` — totals, averages, top/flop posts, caption gaps
 - `captron hook --niche <ai|money|fitness|story|tech> --count 5 --seed x` — offline viral hooks (deterministic)

@@ -204,5 +204,5 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
   }
 }
 
-module.exports = { analytics, analyticsToCsv, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
+module.exports = { analytics, analyticsToCsv, fetchInsights, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
 
