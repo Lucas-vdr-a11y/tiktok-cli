@@ -7,8 +7,24 @@
     "captron": "./bin/captron.js"
   },
   "main": "./src/cli.js",
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    "docs/",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lucas-vdr-a11y/tiktok-cli.git"
+  },
+  "homepage": "https://github.com/Lucas-vdr-a11y/tiktok-cli#readme",
+  "bugs": {
+    "url": "https://github.com/Lucas-vdr-a11y/tiktok-cli/issues"
   },
   "scripts": {
     "test": "node --test test/unit/",
