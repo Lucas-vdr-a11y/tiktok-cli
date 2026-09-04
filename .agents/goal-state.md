@@ -10,7 +10,7 @@ Completely reverse engineer TikTok and develop a CLI (for agents) whose main use
 - Tests written and passing (44)
 - GitHub repo has regular commits and multiple merged PRs
 
-active — v0.4.0; 21 commands (post flags/cover/retries, delete, trending/hashtags/comments, config/new/completion, hook/audit, bulk download, analytics+posts CSV, resumable batch, login --from); 64 tests pass; PR #5 open
+active — v0.5.0; 23 commands (+probe/fit); strict mode, jitter, doctor --fix; 73 tests pass; PR #5 + PR #6 open
 
 - v0.4.0 NEW: `hook` (offline viral hooks, 5 niches, deterministic seed), `audit` (totals/top/flops/caption gaps), `login --from seed.json`, `posts --scheduled/--export`, `post --retries`; completion covers all commands (64/64 tests)
 - v0.3.0 NEW: `delete --yes`, `trending`, `hashtags <tag>`, `comments`, `config`, `new <series>`, `completion`; post `--desc-file/--allow-*/--cover/--timeout/--dry-run`; posts `--query/--sort`; download `--all`; analytics `--export`; batch `--shuffle/--resume/--state/--stop-on-error`; doctor ffmpeg/disk/env (62/62 tests)
