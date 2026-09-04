@@ -29,6 +29,7 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron drafts [account]` — list drafts
 - `captron drafts --publish <id>` / `--delete <id>`
 - `captron content [account]` — posts + drafts in one call
+- `captron analytics [account] --days <1|7|28|60>` — views, likes, comments, shares, followers, viewers
 - `captron batch <manifest>` — post many (JSON/CSV)
 - `captron doctor` — environment check
 

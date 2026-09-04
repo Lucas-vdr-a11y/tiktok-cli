@@ -53,6 +53,24 @@ The publish request carries `msToken`, `X-Bogus`, and `X-Gnarly` — anti-bot si
 | POST | `/tiktok/web/project/post/v1/` | **Publish** |
 | POST | `/tiktok/creator/manage/item_list/v1/` | List posts |
 | POST | `/tiktok/v1/creator/publish_setting/` | Publish settings |
+| GET | `/tiktok/v1/analytics/insights/` | **Analytics metrics (batched, no signature)** |
+
+## Analytics insights API
+
+The Studio analytics dashboard hydrates from one batched endpoint:
+
+```
+GET /tiktok/v1/analytics/insights/
+    ?type_requests=[{"insight_type":121,"data_date_range":7},...]
+    &time_offset=<seconds from UTC>
+    &is_dark_mode=false
+```
+
+- **No X-Bogus / X-Gnarly signature required** (unlike most `/tiktok/v1` APIs) — session cookies authorize the request. Captron issues it from page context (`fetch`) after loading `/tiktokstudio/analytics`.
+- `data_date_range` accepts **1, 7, 28 or 60** days.
+- Metric ids (mapped by probing 1–160, 2026-09): views **121**, profile views **122**, likes **123**, comments **124**, shares **125**, creator rewards **126**, traffic sources **127**, new viewers **140**, total viewers **141**, viewer active days **145**, active hours **146**, followers **160**.
+- The response keys metrics by semantic name (`analytics_overview_views`, `analytics_follower_total_followers`, …) — see `RESPONSE_KEYS` in `src/analytics.js`.
+- Each metric wraps its fields (`total`, `delta_change`, `percent_change`, `list`, `key_value`) as `{message: {data_source, status, timestamp}, value?}`. Status **1** = ok, **2** = no data/empty, 7/9/10 = not applicable. `src/analytics.js#unwrap` strips this envelope.
 
 ## Localization
 

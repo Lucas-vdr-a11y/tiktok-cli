@@ -64,23 +64,25 @@ const RESPONSE_KEYS = {
 /** Strip the `{message:{...}}` wrapper; return the plain value or null. */
 function unwrap(wrapped) {
   if (!wrapped || typeof wrapped !== 'object') return null;
-  if ('value' in wrapped && (wrapped.value === null || typeof wrapped.value !== 'object' || Array.isArray(wrapped.value))) {
-    return { value: wrapped.value, status: wrapped.message ? wrapped.message.status : undefined };
-  }
-  if ('value' in wrapped && wrapped.value !== null && typeof wrapped.value === 'object' && !Array.isArray(wrapped.value) && 'message' in wrapped.value) {
-    // e.g. {list: {message:{...}, value:[{message:{...}, value:0}, ...]}}
-    return {
-      value: (wrapped.value.value || []).map((v) => (v && typeof v === 'object' && 'value' in v ? v.value : v)),
-      status: wrapped.value.message ? wrapped.value.message.status : undefined,
-    };
+  const status = wrapped.message ? wrapped.message.status : undefined;
+  if ('value' in wrapped) {
+    const v = wrapped.value;
+    if (Array.isArray(v)) {
+      // list of wrapped day-values -> unwrap each element
+      return { value: v.map((el) => (el && typeof el === 'object' && 'value' in el ? el.value : el)), status };
+    }
+    if (v === null || typeof v !== 'object') return { value: v, status };
+    if ('message' in v || 'value' in v) {
+      // nested wrapper (e.g. a list field embedding its own message/value)
+      const inner = unwrap(v);
+      return { value: inner ? inner.value : v, status: v.message ? v.message.status : status };
+    }
+    return { value: v, status };
   }
   if ('key_value' in wrapped) {
-    return { value: wrapped.key_value, status: wrapped.message ? wrapped.message.status : undefined };
+    return { value: wrapped.key_value, status };
   }
-  if ('message' in wrapped) {
-    return { value: null, status: wrapped.message.status };
-  }
-  return { value: null, status: undefined };
+  return { value: null, status };
 }
 /** Total + delta + percent + daily series for an overview metric. */
 function parseSeries(metric) {
