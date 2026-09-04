@@ -190,6 +190,18 @@ function buildProgram() {
     });
 
   program
+    .command('download [postId]')
+    .description('Download one of your published videos (default: most recent).')
+    .option('-o, --out <path>', 'output .mp4 path', null)
+    .action(async (postId, opts) => {
+      applyGlobals();
+      const { downloadPost } = require('./download');
+      const res = await downloadPost({ account: globalOptions.account || 'main', postId: postId || null, out: opts.out, headless: globalOptions.headless });
+      printResult(res, (r) => (r.ok ? 'Saved ' + r.file + ' (' + Math.round(r.bytes / 1024) + ' KB) — post ' + r.post.id + ' "' + (r.post.caption || '').slice(0, 40) + '"' : 'Download failed: ' + r.error));
+      if (!res.ok) process.exit(1);
+    });
+
+  program
     .command('content [account]')
     .description('List published posts AND saved drafts in one call.')
     .option('--limit <n>', 'max posts', '20')
@@ -201,7 +213,9 @@ function buildProgram() {
         lines.push('');
         lines.push('Posts (' + r.posts.items.length + (r.posts.total > r.posts.items.length ? '/' + r.posts.total : '') + '):');
         for (const it of r.posts.items) {
-          lines.push('  ' + (it.id || '?') + '  ' + (it.caption || '').slice(0, 44) + '  ' + (it.url || ''));
+          const s = it.stats;
+          const statsTxt = s ? '  · ' + s.views + 'v ' + s.likes + 'l ' + s.comments + 'c' + (it.inReview ? ' [review]' : '') : '';
+          lines.push('  ' + (it.id || '?') + '  ' + (it.caption || '').slice(0, 44) + (it.url ? '  ' + it.url : '') + statsTxt);
         }
         lines.push('');
         lines.push('Drafts (' + r.drafts.items.length + (r.drafts.total > r.drafts.items.length ? '/' + r.drafts.total : '') + '):');

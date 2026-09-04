@@ -62,7 +62,9 @@ function normalizeItem(it) {
     pinned: !!it.is_pinned,
     status: it.status != null ? Number(it.status) : null,
     coverUrl: Array.isArray(it.cover_url) && it.cover_url[0] ? it.cover_url[0] : null,
-    downloadUrl: downloadUrls.length ? downloadUrls[downloadUrls.length - 1] : null,
+    // pre-signed CDN urls first (time-limited but directly fetchable), play-API url last
+    downloadUrls: downloadUrls.length ? downloadUrls : [],
+    downloadUrl: downloadUrls.length ? downloadUrls[0] : null,
   };
 }
 
@@ -103,4 +105,10 @@ async function listPostsApi({ account = 'main', limit = 20, headless = false } =
   }
 }
 
+/**
+ * Downloading lives in `download.js` (`captron download [postId]`) — it captures
+ * the video stream the Studio grid plays, because the pre-signed `download_info`
+ * URLs can 403 for non-browser clients and the play-API URL needs session cookies.
+ */
 module.exports = { listPostsApi, fetchItemPage, normalizeItem };
+

@@ -33,8 +33,10 @@ test('normalizeItem: full raw item', () => {
   assert.equal(out.inReview, true);
   assert.equal(out.pinned, false);
   assert.equal(out.coverUrl, 'https://cdn.example/cover.jpg');
-  // download prefers the last (play API) url — most stable
-  assert.equal(out.downloadUrl, 'https://cdn.example/b.mp4');
+  // download prefers the FIRST url — the pre-signed CDN variant is directly
+  // fetchable; the trailing aweme/v1/play/ url rejects anonymous/other-UA clients
+  assert.equal(out.downloadUrl, 'https://cdn.example/a.mp4');
+  assert.deepEqual(out.downloadUrls, ['https://cdn.example/a.mp4', 'https://cdn.example/b.mp4']);
 });
 
 test('normalizeItem: private visibility maps to private', () => {

@@ -123,7 +123,9 @@ test('posts.normalizeItem: full raw item', () => {
   assert.equal(it.visibility, 'public');
   assert.equal(it.inReview, true);
   assert.equal(it.coverUrl, 'https://example.com/cover.jpg');
-  assert.equal(it.downloadUrl, 'https://c');
+  // first url = pre-signed CDN variant, directly fetchable (see posts.js)
+  assert.equal(it.downloadUrl, 'https://a');
+  assert.deepEqual(it.downloadUrls, ['https://a', 'https://b', 'https://c']);
 });
 
 test('posts.normalizeItem: private visibility and missing fields', () => {

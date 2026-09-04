@@ -164,11 +164,42 @@ async function listContent({ account = 'main', limit = 20, headless = false } = 
     }
     const handle = await resolveHandleFromPage(page);
     const { posts, drafts } = await scrapeContent(page);
+    // Enrich posts with per-post stats + download URLs from item_list API
+    // (same session; lazy require avoids circular import with posts.js).
+    let enriched = null;
+    try {
+      const { fetchItemPage } = require('./posts');
+      const body = await fetchItemPage(page, { cursor: 0, size: 50 });
+      if (body && body.status_code === 0 && Array.isArray(body.item_list)) {
+        enriched = new Map();
+        for (const raw of body.item_list) {
+          if (!raw || !raw.item_id) continue;
+          const downloads = raw.download_info && Array.isArray(raw.download_info.download_urls) ? raw.download_info.download_urls : [];
+          enriched.set(String(raw.item_id), {
+            stats: {
+              views: Number(raw.play_count) || 0,
+              likes: Number(raw.like_count) || 0,
+              comments: Number(raw.comment_count) || 0,
+              shares: Number(raw.share_count) || 0,
+              favorites: Number(raw.favorite_count) || 0,
+            },
+            inReview: !!raw.in_review,
+            downloadUrl: downloads.length ? downloads[downloads.length - 1] : null,
+          });
+        }
+      }
+    } catch (err) {
+      verbose('stats enrichment skipped: ' + err.message.split('\n')[0]);
+    }
+    const postsOut = posts.slice(0, limit).map((p) => {
+      const extra = enriched && enriched.get(String(p.id));
+      return extra ? { ...p, ...extra } : p;
+    });
     return {
       ok: true,
       account,
       handle,
-      posts: { ok: true, items: posts.slice(0, limit), total: posts.length },
+      posts: { ok: true, items: postsOut, total: posts.length },
       drafts: { ok: true, items: drafts.slice(0, limit), total: drafts.length },
     };
   } finally {
