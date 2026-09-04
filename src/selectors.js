@@ -10,6 +10,7 @@
 
 const URLS = {
   upload: 'https://www.tiktok.com/tiktokstudio/upload',
+  uploadPhoto: 'https://www.tiktok.com/tiktokstudio/upload?tab=photo',
   creatorCenter: 'https://www.tiktok.com/tiktokstudio',
   content: 'https://www.tiktok.com/tiktokstudio/content',
   analytics: 'https://www.tiktok.com/tiktokstudio/analytics',
@@ -34,20 +35,20 @@ const VISIBILITY_OPTIONS = {
 
 /** Base query selectors (locale independent, stable attributes). */
 const SELECTORS = {
-  // The hidden file input used by the upload page.
+  // The hidden file input used by the upload page (video mode).
   fileInput: 'input[type="file"]',
+
+  // The "Photos" tab — switches the upload page to image/slideshow mode.
+  photoTab: 'button[aria-label*="Photo" i], button[aria-label*="Fotos" i], button[aria-label*="Foto" i], button[aria-label*="Photos" i], button[aria-label*="写真" i], button[aria-label*="照片" i], button[aria-label*="사진" i]',
 
   // Draft.js caption editor in the post editor.
   captionEditor: '.public-DraftEditor-content',
 
   // A "Replace" button is rendered after the file has been accepted/uploaded.
-  replaceButton: 'button[aria-label*="Vervangen"], button[aria-label*="Replace"], button[aria-label*="Reemplazar"], button[aria-label*="替换"], button[aria-label*="入れ替え"]',
+  replaceButton: 'button[aria-label*="Vervangen" i], button[aria-label*="Replace" i], button[aria-label*="Reemplazar" i], button[aria-label*="替换" i], button[aria-label*="入れ替え" i]',
 
   // Link back to TikTok / handle link on the studio chrome.
   handleLink: 'a[href^="/@"]',
-
-  // progress text areas
-  uploadProgressText: 'text=/Geüpload|Uploaded|Percentage|%|Bezig|Upload/',
 };
 
 /** Extract the publish candidate buttons from a page. */

@@ -2,7 +2,7 @@
 
 const { Command } = require('commander');
 const utils = require('./utils');
-const { buildCaption, parseSchedule, validateVideoPath, formatDate, humanize, printResult } = utils;
+const { buildCaptionDetailed, parseSchedule, validateVideoPath, validateImagePaths, formatDate, humanize, printResult, resolveAccount } = utils;
 const auth = require('./auth');
 const browserMod = require('./browser');
 const uploadLib = require('./upload');
@@ -21,52 +21,100 @@ let programRef = null;
 function applyGlobals() {
   const opts = programRef.opts();
   globalOptions = {
-    account: opts.account || utils.activeAccount(),
-    headless: opts.headless || process.env.CAPTRON_HEADLESS === '1',
+    account: resolveAccount(opts.account),
+    headless: opts.headless || /^(1|true|yes)$/i.test(String(process.env.CAPTRON_HEADLESS || '')),
   };
   utils.setVerbose(opts.verbose || process.env.CAPTRON_VERBOSE === '1' || false);
-  utils.setJson(opts.json || false);
+  utils.setJson(opts.json || process.env.CAPTRON_JSON === '1' || false);
 }
 
 async function runPost(videoArg, opts) {
   applyGlobals();
-  const video = videoArg;
-
-  const vcheck = validateVideoPath(video);
-  if (!vcheck.ok) {
-    utils.fail(vcheck.error);
-    process.exit(1);
+  const fs = require('fs');
+  // --desc-file: read caption body from a file (useful for long AI captions).
+  let captionOpt = opts.caption;
+  if (opts.descFile) {
+    try {
+      captionOpt = fs.readFileSync(opts.descFile, 'utf8').trim();
+    } catch (err) {
+      utils.fail('Could not read --desc-file "' + opts.descFile + '": ' + err.message);
+      process.exit(1);
+    }
   }
-
+  // Slideshow mode: --slideshow takes comma-separated image paths (up to 10).
+  const slideshowPaths = opts.slideshow
+    ? opts.slideshow.split(',').map((p) => p.trim()).filter(Boolean)
+    : [];
+  const isSlideshow = slideshowPaths.length > 0 || (opts.slideshow != null && String(opts.slideshow).trim() !== '');
+  let vcheck = null;
+  if (isSlideshow) {
+    const icheck = validateImagePaths(slideshowPaths);
+    if (!icheck.ok) {
+      utils.fail(icheck.error);
+      process.exit(1);
+    }
+  } else {
+    vcheck = validateVideoPath(videoArg);
+    if (!vcheck.ok) {
+      utils.fail(vcheck.error);
+      process.exit(1);
+    }
+    if (vcheck.warning) utils.warn(vcheck.warning);
+  }
   let scheduleDate = parseSchedule(opts.schedule);
   if (opts.schedule && !scheduleDate) {
-    utils.fail('Could not parse --schedule "' + opts.schedule + '". Use ISO "YYYY-MM-DD HH:mm", "today 18:00", "tomorrow 09:00" or "+90m"/"+3d".');
+    utils.fail('Could not parse --schedule "' + opts.schedule + '". Try "YYYY-MM-DD HH:mm", "18:30", "today 18:00", "tomorrow 09:00", "friday 18:00", "+90m", "+3d" or "in 2 hours".');
     process.exit(1);
   }
   if (scheduleDate && scheduleDate.getTime() <= Date.now()) {
     utils.fail('--schedule must be in the future (' + scheduleDate.toISOString() + ').');
     process.exit(1);
   }
-
-  const caption = buildCaption({ caption: opts.caption, hashtags: opts.hashtags });
-
-  utils.step('Posting "' + vcheck.path + '" (' + utils.formatBytes(vcheck.size) + ') to account "' + globalOptions.account + '"');
-  if (caption) utils.step('Caption: ' + caption.replace(/\n/g, ' | '));
+  const { text: caption, warnings } = buildCaptionDetailed({ caption: captionOpt, hashtags: opts.hashtags });
+  for (const w of warnings) utils.warn(w);
+  const strictWarnings = [...warnings, ...((!isSlideshow && vcheck && vcheck.warning) ? [vcheck.warning] : [])];
+  if (opts.strict && strictWarnings.length) {
+    utils.fail('Strict mode: ' + strictWarnings.join('; '));
+    process.exit(1);
+  }
+  const parseFlag = (v, nv) => (v === true || nv === false ? true : v === false || nv === true ? false : null);
+  // commander --no-* gives opts.allowComments=false etc; support both spellings.
+  const allowComment = opts.allowComments != null ? Boolean(opts.allowComments) : opts.allowComment != null ? Boolean(opts.allowComment) : null;
+  const allowDuet = opts.allowDuet != null ? Boolean(opts.allowDuet) : null;
+  const allowStitch = opts.allowStitch != null ? Boolean(opts.allowStitch) : null;
+  void parseFlag;
+  if (opts.dryRun) {
+    printResult({ ok: true, dryRun: true, account: globalOptions.account, video: isSlideshow ? slideshowPaths.join(',') : vcheck.path, caption, schedule: scheduleDate ? scheduleDate.toISOString() : null, visibility: opts.visibility || 'everyone', saveDraft: Boolean(opts.draft) }, (r) => 'Dry run — nothing posted.\n  video: ' + r.video + '\n  caption: ' + (r.caption || '(empty)') + '\n  schedule: ' + (r.schedule || 'now'));
+    return;
+  }
+  utils.step('Posting to account "' + globalOptions.account + '"');
+  if (isSlideshow) utils.step('Mode: SLIDESHOW (' + slideshowPaths.length + ' images)');
+  if (caption) utils.step('Caption: ' + caption.replace(/\n/g, ' | ').slice(0, 160));
   if (opts.schedule) utils.step('Scheduled for: ' + formatDate(scheduleDate));
   if (opts.draft) utils.step('Mode: save DRAFT (no publish)');
-
+  const timeoutMs = opts.timeout ? Number(opts.timeout) * 1000 : 0;
   const context = await browserMod.launchProfile({ account: globalOptions.account, headless: globalOptions.headless });
   const started = Date.now();
   let result;
   try {
-    result = await uploadLib.performPost({
+    const attempt = () => uploadLib.performPost({
       context,
-      videoPath: vcheck.path,
+      videoPath: isSlideshow ? null : vcheck.path,
+      slideshow: isSlideshow ? slideshowPaths : undefined,
       caption,
       schedule: scheduleDate,
       visibility: opts.visibility,
       saveDraft: opts.draft || false,
+      allowComment,
+      allowDuet,
+      allowStitch,
+      cover: opts.cover != null ? Number(opts.cover) : null,
     });
+    const withTimeout = (p) => (timeoutMs > 0 ? utils.withTimeout(p, timeoutMs, 'post timed out after ' + opts.timeout + 's') : p);
+    const retries = Math.max(0, Number(opts.retries) || 0);
+    result = retries > 0
+      ? await utils.retry(async () => withTimeout(attempt()), { tries: retries + 1, delayMs: 5000, onRetry: (e) => utils.warn('retrying after: ' + String(e.message).split('\n')[0]) })
+      : await withTimeout(attempt());
   } catch (err) {
     uploadLib.handlePostError(err);
     return;
@@ -74,23 +122,22 @@ async function runPost(videoArg, opts) {
     await context.close().catch(() => {});
   }
   result.account = globalOptions.account;
-  result.video = vcheck.path;
+  result.video = isSlideshow ? slideshowPaths.join(',') : vcheck.path;
   result.durationSec = Math.round((Date.now() - started) / 1000);
-  printResult(result, (r) =>
-    [
+  printResult(result, (r) => {
+    const lines = [
       '',
       r.ok ? 'Post ' + r.status + ' ✔' : 'Post status: ' + (r.status || 'unknown'),
-      '  video:     ' + r.video,
+      '  ' + (r.slideshow ? 'slideshow (' + r.slideshow + ' images)' : 'video:') + ' ' + r.video,
       '  account:   ' + r.account,
       r.itemId ? '  item id:   ' + r.itemId : '',
       r.projectId ? '  project:   ' + r.projectId : '',
       r.url ? '  url:       ' + r.url : '',
       '  took:      ' + humanize(r.durationSec),
       r.failed ? '  error:     ' + r.error : '',
-    ]
-      .filter(Boolean)
-      .join('\n')
-  );
+    ];
+    return lines.filter(Boolean).join('\n');
+  });
   process.exit(result.failed ? 1 : 0);
 }
 
@@ -116,11 +163,19 @@ function buildProgram() {
 
   program
     .command('login [account]')
-    .description('Log in to a TikTok account (QR code). State persists for later use.')
+    .description('Log in to a TikTok account (QR code). State persists for later use. Use --from <seed.json> to import a browser session non-interactively.')
     .option('-t, --timeout <seconds>', 'login timeout in seconds', '300')
+    .option('--from <file>', 'import session cookies from a JSON file (same format as scripts/seed-session.js)', null)
     .action(async (account, opts) => {
       applyGlobals();
-      const res = await auth.login({ account: account || globalOptions.account || 'main', timeoutSec: Number(opts.timeout), headless: globalOptions.headless });
+      const acct = account || globalOptions.account || 'main';
+      if (opts.from) {
+        const res = await auth.importSession({ account: acct, file: opts.from });
+        printResult(res, (r) => (r.ok ? 'Imported session for "' + r.account + '"' + (r.handle ? ' as @' + r.handle : '') + ' ✔' : 'Import failed: ' + r.error));
+        process.exit(res.ok ? 0 : 1);
+        return;
+      }
+      const res = await auth.login({ account: acct, timeoutSec: Number(opts.timeout), headless: globalOptions.headless });
       printResult(res, (r) => 'Logged in' + (r.handle ? ' as @' + r.handle : '') + ' ✔');
     });
 
@@ -159,22 +214,46 @@ function buildProgram() {
 
   program
     .command('post <video>')
-    .description('Upload a video and post it (with caption, hashtags, schedule, visibility) in one action.')
-    .option('-c, --caption <text>', 'video caption text')
+    .description('Upload a video (or slideshow of images) and post it in one action. Use --slideshow for images.')
+    .option('-c, --caption <text>', 'video/image caption text')
+    .option('--desc-file <path>', 'read caption text from a file')
     .option('-t, --hashtags <tags>', 'comma-separated hashtags (no # needed)')
-    .option('-s, --schedule <when>', 'schedule: "YYYY-MM-DD HH:mm" | "tomorrow HH:mm" | "today HH:mm" | "+2h" | "+3d"')
+    .option('-s, --schedule <when>', 'schedule: "YYYY-MM-DD HH:mm" | "18:30" | "today 18:00" | "tomorrow 09:00" | "friday 18:00" | "+90m" | "+3d" | "in 2 hours"')
     .option('-v, --visibility <who>', 'visibility: everyone | friends | private')
     .option('-d, --draft', 'save as draft instead of publishing')
+    .option('--slideshow <paths>', 'comma-separated image paths for a slideshow (up to 10 images, overrides <video>)')
+    .option('--allow-comments', 'allow comments on this post')
+    .option('--no-allow-comments', 'disable comments on this post')
+    .option('--allow-duet', 'allow duets on this post')
+    .option('--no-allow-duet', 'disable duets on this post')
+    .option('--allow-stitch', 'allow stitches on this post')
+    .option('--no-allow-stitch', 'disable stitches on this post')
+    .option('--cover <seconds>', 'cover frame timestamp in seconds (best-effort)', null)
+    .option('--timeout <seconds>', 'give up after N seconds (default: no timeout)', null)
+    .option('--retries <n>', 'retry failed posts up to N times (default: 0)', '0')
+    .option('--strict', 'fail on validation warnings (long caption, large file)')
+    .option('--dry-run', 'validate inputs and print the plan without posting')
     .action(runPost);
 
   program
     .command('posts [account]')
     .description('List published posts with stats (views, likes, comments, shares) and download URLs.')
     .option('--limit <n>', 'max posts', '20')
+    .option('-q, --query <text>', 'filter by caption text or post id', null)
+    .option('--sort <mode>', 'sort: new | top | liked', 'new')
+    .option('--scheduled', 'only show scheduled posts')
+    .option('--export <file>', 'write posts as CSV to <file>', null)
     .action(async (account, opts) => {
       applyGlobals();
       const { listPostsApi } = require('./posts');
-      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
+      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), query: opts.query, sort: opts.sort, scheduledOnly: Boolean(opts.scheduled), headless: globalOptions.headless });
+      if (res.ok && opts.export) {
+        try {
+          const rows = res.items.map((it) => ({ id: it.id, date: it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '', caption: it.caption, views: it.stats.views, likes: it.stats.likes, comments: it.stats.comments, shares: it.stats.shares, url: 'https://www.tiktok.com/@' + (res.handle || '') + '/video/' + it.id }));
+          require('fs').writeFileSync(opts.export, utils.toCsv(rows, ['id', 'date', 'caption', 'views', 'likes', 'comments', 'shares', 'url']));
+          res.exported = opts.export;
+        } catch (err) { res.exportError = err.message; }
+      }
       printResult(res, (r) => {
         const lines = ['Posts on @' + (r.handle || r.account || '?') + ' (' + r.items.length + '):'];
         for (const it of r.items) {
@@ -184,6 +263,8 @@ function buildProgram() {
           lines.push('  ' + it.id + '  ' + when + '  ' + (it.caption || '(no caption)').slice(0, 40) + sched);
           lines.push('      views ' + (s.views != null ? s.views : '?') + ' · likes ' + (s.likes != null ? s.likes : '?') + ' · comments ' + (s.comments != null ? s.comments : '?') + ' · shares ' + (s.shares != null ? s.shares : '?') + (it.inReview ? '  [in review]' : ''));
         }
+        if (r.exported) lines.push('  csv: ' + r.exported);
+        if (r.exportError) lines.push('  export error: ' + r.exportError);
         if (r.error) lines.push('  error: ' + r.error);
         return lines.join('\n');
       });
@@ -192,11 +273,21 @@ function buildProgram() {
 
   program
     .command('download [postId]')
-    .description('Download one of your published videos (default: most recent).')
-    .option('-o, --out <path>', 'output .mp4 path', null)
+    .description('Download one of your published videos (default: most recent). Use --all for bulk.')
+    .option('-o, --out <path>', 'output .mp4 path (single download)', null)
+    .option('--all', 'download the N most recent posts instead of one')
+    .option('--limit <n>', 'how many to download with --all', '5')
+    .option('--out-dir <dir>', 'directory for --all downloads', '.')
+    .option('-q, --query <text>', 'only download posts matching caption/id', null)
     .action(async (postId, opts) => {
       applyGlobals();
-      const { downloadPost } = require('./download');
+      const { downloadPost, downloadMany } = require('./download');
+      if (opts.all) {
+        const res = await downloadMany({ account: globalOptions.account || 'main', limit: Number(opts.limit), outDir: opts.outDir, query: opts.query, headless: globalOptions.headless });
+        printResult(res, (r) => (r.ok ? 'Downloaded ' + r.downloaded + '/' + r.total + ' to ' + opts.outDir : 'Download failed: ' + r.error));
+        if (!res.ok) process.exit(1);
+        return;
+      }
       const res = await downloadPost({ account: globalOptions.account || 'main', postId: postId || null, out: opts.out, headless: globalOptions.headless });
       printResult(res, (r) => (r.ok ? 'Saved ' + r.file + ' (' + Math.round(r.bytes / 1024) + ' KB) — post ' + r.post.id + ' "' + (r.post.caption || '').slice(0, 40) + '"' : 'Download failed: ' + r.error));
       if (!res.ok) process.exit(1);
@@ -234,10 +325,17 @@ function buildProgram() {
     .description('Account analytics: views, likes, comments, shares, followers, viewers — last N days. Add --posts to include recent posts with stats.')
     .option('-d, --days <n>', 'range: 1, 7, 28 or 60 days', '7')
     .option('-p, --posts <n>', 'also include N most recent posts with per-post stats', '0')
+    .option('--export <file>', 'write metrics as CSV to <file>', null)
     .action(async (account, opts) => {
       applyGlobals();
-      const { analytics } = require('./analytics');
+      const { analytics, analyticsToCsv } = require('./analytics');
       const res = await analytics({ account: account || globalOptions.account || 'main', days: Number(opts.days), posts: Number(opts.posts), headless: globalOptions.headless });
+      if (res.ok && opts.export) {
+        try {
+          require('fs').writeFileSync(opts.export, analyticsToCsv(res));
+          res.exported = opts.export;
+        } catch (err) { res.exportError = err.message; }
+      }
       printResult(res, (r) => {
         const lines = ['Analytics for @' + (r.handle || r.account || '?') + ' (last ' + r.range_days + ' days):'];
         for (const [name, m] of Object.entries(r.metrics || {})) {
@@ -256,6 +354,8 @@ function buildProgram() {
             lines.push('      views ' + s.views + ' · likes ' + s.likes + ' · comments ' + s.comments + ' · shares ' + s.shares);
           }
         }
+        if (r.exported) lines.push('  csv: ' + r.exported);
+        if (r.exportError) lines.push('  export error: ' + r.exportError);
         if (r.posts_error) lines.push('  posts error: ' + r.posts_error);
         if (r.error) lines.push('  error: ' + r.error);
         return lines.join('\n');
@@ -268,8 +368,14 @@ function buildProgram() {
     .description('Post (or draft) many videos from a JSON/CSV manifest — one command for a whole content pipeline.')
     .option('-d, --draft', 'save every item as draft instead of publishing')
     .option('--delay <seconds>', 'seconds to wait between posts', '0')
+    .option('--jitter <seconds>', 'random extra delay 0..N between posts (rate-limit friendly)', '0')
     .option('--max-per-day <n>', 'hard cap on posts per run', '0')
     .option('--dry-run', 'validate the manifest and print the plan without posting')
+    .option('--strict', 'fail manifests with validation warnings')
+    .option('--stop-on-error', 'stop at the first failed post (default: continue)')
+    .option('--shuffle', 'post manifest items in random order')
+    .option('--resume <file>', 'skip items already posted per a previous --state file', null)
+    .option('--state <file>', 'write progress after every post (enables resume)', null)
     .action(async (manifest, opts) => {
       applyGlobals();
       const res = await batchLib.runBatch({
@@ -277,9 +383,15 @@ function buildProgram() {
         defaultAccount: globalOptions.account,
         defaultDraft: opts.draft || false,
         delaySec: Number(opts.delay),
+        jitterSec: Number(opts.jitter),
+        strict: Boolean(opts.strict),
         dryRun: opts.dryRun || false,
         headless: globalOptions.headless,
         maxPerDay: Number(opts.maxPerDay),
+        stopOnError: Boolean(opts.stopOnError),
+        shuffle: Boolean(opts.shuffle),
+        resumeFrom: opts.resume,
+        stateFile: opts.state,
       });
       printResult(res, (r) => {
         if (r.dryRun) {
@@ -330,17 +442,220 @@ function buildProgram() {
     });
 
   program
-    .command('doctor')
-    .description('Check environment: node, browser engines, profiles, session state.')
-    .action(async () => {
+    .command('hook')
+    .description('Generate viral hooks for a niche (offline, for faceless scripts).')
+    .option('--niche <name>', 'ai | money | fitness | story | tech', 'ai')
+    .option('--count <n>', 'how many hooks', '5')
+    .option('--seed <s>', 'seed for reproducible output', 'captron')
+    .action((opts) => {
+      applyGlobals();
+      const { generateHooks, hookCaption } = require('./hooks');
+      const items = generateHooks({ niche: opts.niche, count: Number(opts.count), seed: opts.seed });
+      printResult({ ok: true, niche: opts.niche, items }, (r) => {
+        const lines = ['Hooks (' + r.niche + '):'];
+        r.items.forEach((h, i) => lines.push('  ' + (i + 1) + '. ' + h.hook + '\n     caption: ' + hookCaption({ hook: h.hook }).replace(/\n/g, ' ')));
+        return lines.join('\n');
+      });
+    });
+
+  program
+    .command('audit [account]')
+    .description('Account health check: totals, averages, top + flop posts.')
+    .option('--limit <n>', 'posts to scan', '20')
+    .action(async (account, opts) => {
+      applyGlobals();
+      const { listPostsApi } = require('./posts');
+      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
+      if (!res.ok) { printResult(res, (r) => 'Audit failed: ' + r.error); process.exit(1); }
+      const items = res.items;
+      const sum = (f) => items.reduce((a, it) => a + ((it.stats && it.stats[f]) || 0), 0);
+      const avg = (f) => (items.length ? Math.round(sum(f) / items.length) : 0);
+      const top = [...items].sort((a, b) => b.stats.views - a.stats.views).slice(0, 3);
+      const flops = [...items].sort((a, b) => a.stats.views - b.stats.views).slice(0, 3).filter((it) => it.stats.views < avg('views'));
+      const noCaption = items.filter((it) => !(it.caption || '').trim());
+      const out = { ok: true, account: res.account, handle: res.handle, scanned: items.length, totals: { views: sum('views'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares') }, averages: { views: avg('views'), likes: avg('likes') }, top: top.map((t) => t.id), flops: flops.map((t) => t.id), noCaption: noCaption.length };
+      printResult(out, (r) => {
+        const lines = ['Audit @' + (r.handle || r.account) + ' (' + r.scanned + ' posts):', '  totals:   ' + r.totals.views + ' views · ' + r.totals.likes + ' likes · ' + r.totals.comments + ' comments', '  averages: ' + r.averages.views + ' views/post', '  top:      ' + (r.top.join(', ') || '—'), '  flops:    ' + (r.flops.join(', ') || '—') + (r.noCaption ? '   (' + r.noCaption + ' posts have no caption!)' : '')];
+        return lines.join('\n');
+      });
+    });
+
+  program
+    .command('delete <postId>')
+    .description('Delete a published post by id (requires --yes).')
+    .option('--yes', 'confirm deletion')
+    .action(async (postId, opts) => {
+      applyGlobals();
+      const { deletePost } = require('./posts');
+      const res = await deletePost({ account: globalOptions.account || 'main', postId, headless: globalOptions.headless, yes: Boolean(opts.yes) });
+      printResult(res, (r) => (r.ok ? 'Deleted post ' + r.id + ' ✔' : 'Delete failed: ' + r.error));
+      process.exit(res.ok ? 0 : 1);
+    });
+
+  program
+    .command('trending')
+    .description('Trending hashtags from TikTok Explore (research for captions).')
+    .option('--limit <n>', 'max tags', '20')
+    .action(async (opts) => {
+      applyGlobals();
+      const { trendingTags } = require('./trending');
+      const res = await trendingTags({ limit: Number(opts.limit), headless: globalOptions.headless, account: globalOptions.account || 'main' });
+      printResult(res, (r) => {
+        const lines = ['Trending hashtags (' + r.items.length + '):'];
+        for (const t of r.items) lines.push('  #' + t.tag + (t.views != null ? '  ' + t.views + ' views' : '') + '  ' + t.url);
+        return lines.join('\n');
+      });
+      if (!res.ok) process.exit(1);
+    });
+
+  program
+    .command('hashtags <tag>')
+    .description('Hashtag detail + related tags (research for reach).')
+    .option('--limit <n>', 'max related tags', '10')
+    .action(async (tag, opts) => {
+      applyGlobals();
+      const { hashtagInfo } = require('./trending');
+      const res = await hashtagInfo({ tag, limit: Number(opts.limit), headless: globalOptions.headless, account: globalOptions.account || 'main' });
+      printResult(res, (r) => {
+        const lines = ['#' + r.tag + (r.views != null ? ' — ' + r.views + ' views' : '') + '  ' + r.url, '', 'Related:'];
+        for (const t of r.related || []) lines.push('  #' + t.tag + '  ' + t.url);
+        return lines.join('\n');
+      });
+      if (!res.ok) process.exit(1);
+    });
+
+  program
+    .command('comments [account]')
+    .description('Recent comments on your posts (best-effort inbox scrape).')
+    .option('--limit <n>', 'max comments', '20')
+    .action(async (account, opts) => {
+      applyGlobals();
+      const { listComments } = require('./comments');
+      const res = await listComments({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
+      printResult(res, (r) => {
+        const lines = ['Comments (' + r.items.length + '):'];
+        for (const c of r.items) lines.push('  @' + (c.author || '?') + ': ' + (c.text || '').slice(0, 100) + (c.videoId ? '  [video ' + c.videoId + ']' : ''));
+        return lines.join('\n');
+      });
+      if (!res.ok) process.exit(1);
+    });
+
+  program
+    .command('config [key] [value]')
+    .description('Get/set captron config (default account, homes). No args lists all.')
+    .action((key, value) => {
+      applyGlobals();
+      const cfg = utils.readConfig();
+      if (!key) {
+        printResult({ ok: true, config: cfg }, (r) => 'Config (' + utils.configPath() + '):\n' + JSON.stringify(r.config, null, 2));
+        return;
+      }
+      if (value == null) {
+        printResult({ ok: true, key, value: cfg[key] != null ? cfg[key] : null }, (r) => r.key + ' = ' + JSON.stringify(r.value));
+        return;
+      }
+      cfg[key] = value;
+      utils.writeConfig(cfg);
+      printResult({ ok: true, key, value }, (r) => 'Set ' + r.key + ' = ' + JSON.stringify(r.value));
+    });
+
+  program
+    .command('new <name>')
+    .description('Scaffold a batch manifest + caption file for a new series.')
+    .option('--count <n>', 'number of episode stubs', '5')
+    .action((name, opts) => {
       applyGlobals();
       const fs = require('fs');
+      const n = Math.max(1, Math.min(Number(opts.count) || 5, 50));
+      const items = [];
+      for (let i = 1; i <= n; i++) items.push({ video: './ep' + i + '.mp4', caption: name + ' — part ' + i, hashtags: 'series,faceless,fyp', visibility: 'everyone' });
+      const file = name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase() + '.manifest.json';
+      fs.writeFileSync(file, JSON.stringify(items, null, 2));
+      printResult({ ok: true, file, count: n }, (r) => 'Wrote ' + r.file + ' (' + r.count + ' episodes). Edit captions, then `captron batch ' + r.file + ' --dry-run`.');
+    });
+
+  program
+    .command('completion')
+    .description('Print a bash/zsh completion script.')
+    .action(() => {
+      const script = [
+        '# captron completion (bash + zsh)',
+        '# usage: eval "$(captron completion)"',
+        '_captron_cmds="login logout whoami accounts post probe fit posts content analytics audit hook download drafts batch delete trending hashtags comments config new doctor completion"',
+        'if [ -n "$BASH_VERSION" ]; then',
+        '  _captron() { local cur="${COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "$_captron_cmds" -- "$cur")); }',
+        '  complete -F _captron captron',
+        'elif [ -n "$ZSH_VERSION" ]; then',
+        '  _captron() { local -a cmds; cmds=(${(s: :)_captron_cmds}); _describe "captron" cmds; }',
+        '  compdef _captron captron',
+        'fi',
+        '',
+      ].join('\n');
+      process.stdout.write(script);
+    });
+
+  program
+    .command('probe <file>')
+    .description('Inspect a video/image for TikTok-readiness (offline: size, codec, duration, fit verdict).')
+    .action((file) => {
+      applyGlobals();
+      const { probeFile } = require('./media');
+      const res = probeFile(file);
+      printResult(res, (r) => {
+        if (!r.ok && r.error) return 'Probe failed: ' + r.error;
+        const lines = ['Probe ' + r.file + ' (' + r.sizeHuman + ', ' + r.kind + '):'];
+        if (r.durationSec != null) lines.push('  duration: ' + r.durationSec + 's');
+        if (r.width) lines.push('  video:    ' + r.width + 'x' + r.height + ' ' + (r.vcodec || '') + (r.acodec ? ' + ' + r.acodec : ''));
+        lines.push('  verdict:  ' + (r.fitsTikTok ? 'fits TikTok ✔' : 'needs work ✖'));
+        for (const i of r.issues) lines.push('  issue:    ' + i);
+        for (const w of r.warnings) lines.push('  warning:  ' + w);
+        return lines.join('\n');
+      });
+      process.exit(res.fitsTikTok ? 0 : 1);
+    });
+
+  program
+    .command('fit <input>')
+    .description('Normalize a video to vertical 1080x1920 H.264/AAC MP4 via ffmpeg (offline).')
+    .option('-o, --out <path>', 'output path (default: <input>.tiktok.mp4)', null)
+    .option('--width <n>', 'target width', '1080')
+    .option('--height <n>', 'target height', '1920')
+    .option('--fps <n>', 'target fps', '30')
+    .action((input, opts) => {
+      applyGlobals();
+      const { fitFile } = require('./media');
+      const res = fitFile({ input, output: opts.out, width: Number(opts.width), height: Number(opts.height), fps: Number(opts.fps) });
+      printResult(res, (r) => (r.ok ? 'Fitted ' + r.output + ' (' + utils.formatBytes(r.bytes) + ') ✔' : 'Fit failed: ' + r.error));
+      process.exit(res.ok ? 0 : 1);
+    });
+
+  program
+    .command('doctor')
+    .description('Check environment: node, browser engines, ffmpeg, disk, profiles, session state.')
+    .option('--fix', 'remove stale Chromium lock files from profiles')
+    .action(async (opts) => {
+      applyGlobals();
+      if (opts.fix) {
+        const { fixStaleLocks } = require('./media');
+        const fixed = fixStaleLocks();
+        utils.ok(fixed.removed.length ? 'Removed ' + fixed.removed.length + ' stale lock(s): ' + fixed.removed.join(', ') : 'No stale locks found.');
+      }
+      const fs = require('fs');
+      const { execSync } = require('child_process');
       const { chromium } = require('playwright');
       const info = {
         node: process.version,
         home: utils.homeDir(),
         profiles: [],
         browsers: {},
+        ffmpeg: 'missing (optional — only needed for local transcoding)',
+        disk: null,
+        env: {
+          CAPTRON_ACCOUNT: process.env.CAPTRON_ACCOUNT || null,
+          CAPTRON_HEADLESS: process.env.CAPTRON_HEADLESS || null,
+          CAPTRON_BROWSER_CHANNEL: process.env.CAPTRON_BROWSER_CHANNEL || 'chrome',
+          CAPTRON_HOME: process.env.CAPTRON_HOME || null,
+        },
         loggedIn: false,
       };
       try {
@@ -357,17 +672,33 @@ function buildProgram() {
           info.browsers[channel] = 'unavailable';
         }
       }
-      const context = await browserMod.launchProfile({ account: globalOptions.account || 'main', headless: true });
-      info.loggedIn = await auth.isLoggedIn(context);
-      await context.close();
+      try {
+        const v = execSync('ffmpeg -version', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n')[0];
+        info.ffmpeg = v.slice(0, 80);
+      } catch (_) {}
+      try {
+        const st = fs.statfsSync ? fs.statfsSync(utils.homeDir()) : null;
+        if (st) info.disk = utils.formatBytes(Number(st.bavail) * Number(st.bsize)) + ' free';
+      } catch (_) {}
+      try {
+        const context = await browserMod.launchProfile({ account: globalOptions.account || 'main', headless: true });
+        info.loggedIn = await auth.isLoggedIn(context);
+        await context.close();
+      } catch (err) {
+        info.sessionError = String(err.message).split('\n')[0];
+      }
       printResult(info, (r) => {
         const lines = ['doctor:'];
         lines.push('  node:         ' + r.node);
         lines.push('  captron home: ' + r.home);
         lines.push('  chromium:     ' + (r.browsers.chromium || '?'));
         lines.push('  chrome:       ' + (r.browsers.chrome || '?'));
+        lines.push('  ffmpeg:       ' + r.ffmpeg);
+        if (r.disk) lines.push('  disk:        ' + r.disk);
         lines.push('  profiles:     ' + (r.profiles.length ? r.profiles.map((p) => p.name).join(', ') : '(none yet — run `captron login`)'));
         lines.push('  logged in:    ' + (r.loggedIn ? 'yes' : 'NO'));
+        if (r.sessionError) lines.push('  session err:  ' + r.sessionError);
+        lines.push('  env:          ' + Object.entries(r.env).map(([k, v]) => k + '=' + (v || '—')).join(' '));
         return lines.join('\n');
       });
     });
