@@ -78,7 +78,7 @@ function validateSpec(s, scheduleDate) {
 }
 
 /** Run a batch: post every spec, respecting per-account sessions + delay. */
-async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, jitterSec = 0, strict = false, probe = false, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
+async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, jitterSec = 0, strict = false, probe = false, retries = 0, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
   let specs = parseManifest(manifest);
   if (shuffle) {
     for (let i = specs.length - 1; i > 0; i--) {
@@ -140,20 +140,34 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
       try {
         if (spec.draft) info('[' + (spec.index + 1) + '/' + specs.length + '] saving draft: ' + spec.video);
         else info('[' + (spec.index + 1) + '/' + specs.length + '] posting: ' + spec.video);
-        const r = await performPost({
-          context: contexts[acct],
-          videoPath: path.resolve(spec.video),
-          caption: spec.caption,
-          schedule: spec.scheduleDate, // real Date
-          visibility: spec.visibility,
-          saveDraft: Boolean(spec.draft),
-          allowComment: spec.allowComment,
-          allowDuet: spec.allowDuet,
-          allowStitch: spec.allowStitch,
-          cover: spec.cover,
-        });
-        Object.assign(result, r);
-        ok('  -> ' + (r.itemId || r.url || 'done'));
+        const maxAttempts = Math.max(1, (Number(retries) || 0) + 1);
+        let attempt = 0;
+        for (;;) {
+          attempt++;
+          try {
+            const r = await performPost({
+              context: contexts[acct],
+              videoPath: path.resolve(spec.video),
+              caption: spec.caption,
+              schedule: spec.scheduleDate, // real Date
+              visibility: spec.visibility,
+              saveDraft: Boolean(spec.draft),
+              allowComment: spec.allowComment,
+              allowDuet: spec.allowDuet,
+              allowStitch: spec.allowStitch,
+              cover: spec.cover,
+            });
+            Object.assign(result, r);
+            result.attempts = attempt;
+            ok('  -> ' + (r.itemId || r.url || 'done'));
+            break;
+          } catch (err) {
+            if (err instanceof NotLoggedInError) throw err; // never retry login failures
+            if (attempt >= maxAttempts) throw err;
+            warn('  attempt ' + attempt + '/' + maxAttempts + ' failed (' + String(err.message).split('\n')[0] + ') — retrying in 10s…');
+            await sleep(10000);
+          }
+        }
       } catch (err) {
         result.error = err.message;
         result.failed = true;

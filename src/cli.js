@@ -70,6 +70,23 @@ async function runPost(videoArg, opts) {
         for (const w of probe.warnings || []) utils.warn(w);
       }
     } catch (_) { /* probe is advisory only */ }
+    // --auto-fit: normalize landscape/odd codecs before uploading.
+    if (opts.autoFit && vcheck.probe && vcheck.probe.kind === 'video') {
+      const needsFit = (vcheck.probe.warnings || []).some((w) => /landscape|codec|vertical/i.test(w));
+      if (needsFit) {
+        const { fitFile } = require('./media');
+        utils.step('Auto-fitting to 1080x1920 H.264…');
+        const fitted = fitFile({ input: vcheck.path });
+        if (!fitted.ok) {
+          utils.fail('Auto-fit failed: ' + fitted.error);
+          process.exit(1);
+        }
+        vcheck.path = fitted.output;
+        utils.step('Fitted: ' + fitted.output + ' (' + utils.formatBytes(fitted.bytes) + ')');
+      } else {
+        utils.step('Video already fits — skipping auto-fit.');
+      }
+    }
   }
   let scheduleDate = parseSchedule(opts.schedule);
   if (opts.schedule && !scheduleDate) {
@@ -225,6 +242,34 @@ function buildProgram() {
     });
 
   program
+    .command('use <account>')
+    .description('Switch the active account profile (no browser needed).')
+    .action((account) => {
+      applyGlobals();
+      const res = auth.useAccount(account);
+      printResult(res, (r) => (r.ok ? 'Active account: "' + r.account + '" ✔' : 'Use failed: ' + r.error));
+      if (!res.ok) process.exit(1);
+    });
+
+  program
+    .command('update')
+    .description('Check for updates (or install the latest from npm).')
+    .option('--check', 'only report, do not install')
+    .option('--tag <tag>', 'npm dist-tag to install', 'latest')
+    .action(async (opts) => {
+      applyGlobals();
+      const { checkUpdate, runUpdate } = require('./update');
+      const st = await checkUpdate();
+      if (opts.check || !st.latest || !st.available) {
+        printResult({ ok: true, ...st }, (r) => (r.latest ? 'captron ' + r.current + ' (latest ' + r.latest + (r.available ? ' — update available: `captron update`' : ' — up to date ✔') + ')' : 'captron ' + r.current + ' (registry unreachable — staying put)'));
+        return;
+      }
+      utils.step('Installing captron@' + opts.tag + '…');
+      const res = runUpdate({ tag: opts.tag });
+      process.exit(res.ok ? 0 : 1);
+    });
+
+  program
     .command('post <video>')
     .description('Upload a video (or slideshow of images) and post it in one action. Use --slideshow for images.')
     .option('-c, --caption <text>', 'video/image caption text')
@@ -243,8 +288,8 @@ function buildProgram() {
     .option('--cover <seconds>', 'cover frame timestamp in seconds (best-effort)', null)
     .option('--timeout <seconds>', 'give up after N seconds (default: no timeout)', null)
     .option('--retries <n>', 'retry failed posts up to N times (default: 0)', '0')
+    .option('--auto-fit', 'normalize landscape/odd codecs to 1080x1920 via ffmpeg before uploading')
     .option('--strict', 'fail on validation warnings (long caption, large file)')
-    .option('--dry-run', 'validate inputs and print the plan without posting')
     .action(runPost);
 
   program
@@ -385,6 +430,7 @@ function buildProgram() {
     .option('--max-per-day <n>', 'hard cap on posts per run', '0')
     .option('--dry-run', 'validate the manifest and print the plan without posting')
     .option('--strict', 'fail manifests with validation warnings')
+    .option('--retries <n>', 'retry each failed post up to N times (default: 0)', '0')
     .option('--stop-on-error', 'stop at the first failed post (default: continue)')
     .option('--shuffle', 'post manifest items in random order')
     .option('--resume <file>', 'skip items already posted per a previous --state file', null)
@@ -403,6 +449,7 @@ function buildProgram() {
         headless: globalOptions.headless,
         maxPerDay: Number(opts.maxPerDay),
         stopOnError: Boolean(opts.stopOnError),
+        retries: Number(opts.retries) || 0,
         shuffle: Boolean(opts.shuffle),
         resumeFrom: opts.resume,
         stateFile: opts.state,
@@ -634,7 +681,7 @@ function buildProgram() {
       const script = [
         '# captron completion (bash + zsh)',
         '# usage: eval "$(captron completion)"',
-        '_captron_cmds="login logout whoami accounts post probe fit posts content sync calendar caption analytics best-time audit hook download drafts batch delete trending hashtags comments config new clean doctor completion"',
+        '_captron_cmds="login logout whoami accounts use post probe fit posts content sync calendar caption analytics best-time audit hook download drafts batch delete trending hashtags comments config new clean update doctor completion"',
         'if [ -n "$BASH_VERSION" ]; then',
         '  _captron() { local cur="${COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "$_captron_cmds" -- "$cur")); }',
         '  complete -F _captron captron',
@@ -755,18 +802,12 @@ function buildProgram() {
         info.loggedIn = 'skipped (--offline)';
       }
       try {
-        const local = require('../package.json').version;
-        info.version = local;
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch('https://registry.npmjs.org/captron/latest', { signal: ctrl.signal }).catch(() => null);
-        clearTimeout(t);
-        if (res && res.ok) {
-          const data = await res.json().catch(() => null);
-          if (data && data.version) {
-            info.latest = data.version;
-            info.update = data.version !== local ? 'update available: npm i -g captron@' + data.version : 'up to date';
-          }
+        const { checkUpdate } = require('./update');
+        const st = await checkUpdate();
+        info.version = st.current;
+        if (st.latest) {
+          info.latest = st.latest;
+          info.update = st.available ? 'update available: run `captron update`' : 'up to date';
         }
       } catch (_) { /* version check is advisory */ }
       printResult(info, (r) => {

@@ -38,10 +38,9 @@ captron content          # lists posts + drafts
 | Command | What it does |
 |---|---|
 | `login [account]` | Log in via QR code, or `login --from seed.json` to import a browser session non-interactively. State persists in `~/.captron/profiles/<account>`. |
-| `logout [account]` | Clear a saved session. |
-| `whoami [account]` | Show session status + handle. |
 | `accounts` | List configured account profiles. |
-| `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--retries 2` retries failures, `--strict` fails on warnings. Use `--slideshow` for images. |
+| `use <account>` | Switch the active profile (instant, offline). |
+| `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--retries 2` retries failures, `--auto-fit` normalizes video first, `--strict` fails on warnings. Use `--slideshow` for images. |
 | `post <video> --slideshow <paths>` | Upload a slideshow of images (comma-separated, up to 10). |
 | `probe <file>` | Offline TikTok-readiness check (size, codec, duration, verdict). |
 | `fit <input> -o <out>` | Normalize to vertical 1080x1920 H.264/AAC via ffmpeg (offline). |
@@ -60,12 +59,13 @@ captron content          # lists posts + drafts
 | `trending` | Trending hashtags from Explore (caption research). |
 | `hashtags <tag>` | Hashtag detail + related tags. |
 | `comments [account]` | Recent comments on your posts (best-effort). |
-| `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--probe` pre-flights media, `--strict` fails warned items. |
+| `batch <manifest>` | Post many videos from a JSON/CSV manifest. `--delay 20 --jitter 8` spaces posts, `--probe` pre-flights media, `--retries 2` retries each item, `--strict` fails warned items. |
 | `config [key] [value]` | Get/set config (no args lists all). |
 | `new <name>` | Scaffold a `<name>.manifest.json` series template (`--count 5 --niche money --seed x` fills hook captions). |
 | `clean [--dry-run]` | Free disk: prune disposable Chromium caches (sessions kept). |
 | `completion` | Print bash/zsh completion (`eval "$(captron completion)"`). |
 | `doctor [--fix] [--offline]` | Check environment, browser, ffmpeg, disk, profile sizes, session + update check. `--fix` clears stale locks; `--offline` skips browsers (fast). |
+| `update [--check]` | Check npm for a newer captron (`--check` reports only). |
 
 ### `post` options
 
@@ -82,6 +82,7 @@ captron content          # lists posts + drafts
 --cover <seconds>          Cover frame timestamp (best-effort)
 --timeout <seconds>        Give up after N seconds
 --retries <n>              Retry failed posts up to N times
+--auto-fit                 Normalize landscape/odd codecs via `fit` before uploading (skips when already fitting)
 --strict                   Fail on warnings (long caption, large file) instead of posting
 --dry-run                  Validate inputs without posting
 --headless                 Run browser headless (or CAPTRON_HEADLESS=1)

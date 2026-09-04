@@ -150,6 +150,24 @@ function accounts() {
 }
 
 /**
+ * `captron use <account>` — switch the active profile (no browser needed).
+ * Creates the profile dir lazily so the next login/post just works.
+ */
+function useAccount(name) {
+  const { ensureHome } = require('./utils');
+  if (!name || !String(name).trim()) return { ok: false, error: 'missing account name (usage: captron use <account>)' };
+  const account = String(name).trim();
+  ensureHome();
+  const cfg = readConfig();
+  if (!(cfg.accounts || []).some((a) => a.name === account)) {
+    cfg.accounts = [...(cfg.accounts || []), { name: account, profileDir: profileDir(account), handle: null, loginAt: null }];
+  }
+  cfg.activeAccount = account;
+  writeConfig(cfg);
+  return { ok: true, account, activeAccount: account };
+}
+
+/**
  * Import a session exported from another browser into a captron profile.
  * Accepts `{ cookies: [...], localStorage: {...} }` or a bare cookie array.
  * Same format as `scripts/seed-session.js`. Returns { ok, account, cookies }.
@@ -209,4 +227,4 @@ async function importSession({ account = 'main', file } = {}) {
   }
 }
 
-module.exports = { isLoggedIn, login, logout, whoami, accounts, importSession };
+module.exports = { isLoggedIn, login, logout, whoami, accounts, useAccount, importSession };

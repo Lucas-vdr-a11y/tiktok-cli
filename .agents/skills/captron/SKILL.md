@@ -21,8 +21,8 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 
 - `captron login [account]` — log in via QR; `--from seed.json` imports a session non-interactively
 - `captron whoami [account]` — session status + handle
-- `captron accounts` — list profiles
-- `captron post <video> [opts]` — upload + publish (or draft); `--retries 2` retries failures, `--strict` fails on warnings
+- `captron accounts` — list profiles; `captron use <account>` switches active (instant, offline)
+- `captron post <video> [opts]` — upload + publish (or draft); `--retries 2` retries failures, `--auto-fit` normalizes video first, `--strict` fails on warnings
 - `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
 - `captron probe <file>` — offline TikTok-readiness check (size, codec, duration, verdict)
 - `captron fit <input> -o <out>` — normalize to vertical 1080x1920 H.264/AAC via ffmpeg
@@ -41,8 +41,8 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron trending --limit 20` — trending hashtags (caption research)
 - `captron hashtags <tag>` — hashtag detail + related tags
 - `captron comments --limit 20` — recent comments (best-effort)
-- `captron batch <manifest> [--delay 20 --jitter 8 --probe --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many (JSON/CSV); `--probe` pre-flights every video offline
-- `captron config [key] [value]` — get/set config; `captron new <series> [--niche money --seed x]` scaffolds a manifest (hooks as captions with --niche)
+- `captron batch <manifest> [--delay 20 --jitter 8 --probe --retries 2 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many; `--probe` pre-flights, `--retries` retries each item
+- `captron update [--check]` — check/install latest from npm (`--check` reports only)
 - `captron clean [--dry-run]` — free disk: prune Chromium caches (sessions kept)
 - `captron doctor [--fix] [--offline]` — environment check (profile sizes + npm update check); `--fix` clears locks, `--offline` skips browsers
 
@@ -57,7 +57,7 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `--allow-comments/--no-allow-comments`, `--allow-duet/--no-allow-duet`, `--allow-stitch/--no-allow-stitch`
 - `--cover <seconds>` — cover frame timestamp (best-effort)
 - `--timeout <seconds>` / `--retries <n>` / `--dry-run` — give up after N s / retry failures / validate only
-- `--strict` — fail on warnings (long caption, large file) instead of posting
+- `--auto-fit` — normalize landscape/odd codecs via `fit` first (skips when already fitting)
 - `--headless` — run browser without a window (or `CAPTRON_HEADLESS=1`)
 - `--json` — machine-readable output (use this in scripts/agents; or `CAPTRON_JSON=1`)
 - `-a, --account <name>` — pick account profile (or `CAPTRON_ACCOUNT`)

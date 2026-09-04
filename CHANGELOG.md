@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0 — 2026-09-04
+
+Resilience + flow wave (93 tests pass).
+
+- `batch --retries <n>` — per-item retry with 10s backoff (login failures
+  still stop the run immediately, never retried).
+- `post --auto-fit` — when `probe` flags landscape/odd codecs, normalize
+  via `fit` automatically before uploading; skips when already fitting,
+  fails loudly when ffmpeg is missing.
+- `use <account>` — instant offline active-profile switch (creates the
+  entry lazily; `auth.useAccount`, tested with isolated CAPTRON_HOME).
+- `update [--check]` — npm self-update built on a shared `src/update.js`
+  (`getLatest`/`checkUpdate` with short-timeout graceful degradation);
+  `doctor` reuses it instead of inline fetch code.
+
 ## 0.8.0 — 2026-09-04
 
 Pre-flight + fast doctor wave (87 tests pass).
