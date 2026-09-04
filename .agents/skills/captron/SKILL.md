@@ -19,16 +19,16 @@ captron post <video> --caption "text" --hashtags "tag1,tag2"
 
 This single command does the whole pipeline: upload → caption → (confirm modal) → publish. Returns JSON with `itemId`, `status`, `ok`.
 
-## Commands
-
-- `captron login [account]` — log in via QR; state persists per account
+- `captron login [account]` — log in via QR; `--from seed.json` imports a session non-interactively
 - `captron whoami [account]` — session status + handle
 - `captron accounts` — list profiles
-- `captron post <video> [opts]` — upload + publish (or draft)
+- `captron post <video> [opts]` — upload + publish (or draft); `--retries 2` retries failures
 - `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
-- `captron posts [account] --query <text> --sort top|liked` — published posts with stats + download URLs
+- `captron posts [account] --query <text> --sort top|liked --scheduled --export posts.csv` — posts with stats + download URLs
 - `captron content [account]` — posts + drafts in one call
 - `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts in one call
+- `captron audit --limit 20` — totals, averages, top/flop posts, caption gaps
+- `captron hook --niche <ai|money|fitness|story|tech> --count 5 --seed x` — offline viral hooks (deterministic)
 - `captron download [postId] -o out.mp4` — single video; `--all --limit 10 --out-dir ./clips --query <text>` for bulk
 - `captron delete <postId> --yes` — delete a published post (safety catch)
 - `captron drafts` — list drafts; `--publish <id>` / `--delete <id>`

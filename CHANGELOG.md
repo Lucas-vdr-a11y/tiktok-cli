@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 — 2026-09-04
+
+Second wave on the same branch (64 tests pass).
+
+- `hook` — offline viral hook generator (5 niches, deterministic `--seed`).
+- `audit` — totals/averages/top/flops/caption-gap health check.
+- `login --from seed.json` — non-interactive session import (same format as
+  `scripts/seed-session.js`), for agents provisioning profiles in CI.
+- `posts --scheduled` (queued only) + `posts --export posts.csv`.
+- `post --retries <n>` — retry failures with backoff.
+- Completion script covers all 21 commands.
+
 ## 0.3.0 — 2026-09-04
 
 Creator power + agent DX release. 62 unit tests pass.

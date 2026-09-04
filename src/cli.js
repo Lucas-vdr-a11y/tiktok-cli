@@ -92,7 +92,7 @@ async function runPost(videoArg, opts) {
   const started = Date.now();
   let result;
   try {
-    const run = uploadLib.performPost({
+    const attempt = () => uploadLib.performPost({
       context,
       videoPath: isSlideshow ? null : vcheck.path,
       slideshow: isSlideshow ? slideshowPaths : undefined,
@@ -105,7 +105,11 @@ async function runPost(videoArg, opts) {
       allowStitch,
       cover: opts.cover != null ? Number(opts.cover) : null,
     });
-    result = timeoutMs > 0 ? await utils.withTimeout(run, timeoutMs, 'post timed out after ' + opts.timeout + 's') : await run;
+    const withTimeout = (p) => (timeoutMs > 0 ? utils.withTimeout(p, timeoutMs, 'post timed out after ' + opts.timeout + 's') : p);
+    const retries = Math.max(0, Number(opts.retries) || 0);
+    result = retries > 0
+      ? await utils.retry(async () => withTimeout(attempt()), { tries: retries + 1, delayMs: 5000, onRetry: (e) => utils.warn('retrying after: ' + String(e.message).split('\n')[0]) })
+      : await withTimeout(attempt());
   } catch (err) {
     uploadLib.handlePostError(err);
     return;
@@ -154,11 +158,19 @@ function buildProgram() {
 
   program
     .command('login [account]')
-    .description('Log in to a TikTok account (QR code). State persists for later use.')
+    .description('Log in to a TikTok account (QR code). State persists for later use. Use --from <seed.json> to import a browser session non-interactively.')
     .option('-t, --timeout <seconds>', 'login timeout in seconds', '300')
+    .option('--from <file>', 'import session cookies from a JSON file (same format as scripts/seed-session.js)', null)
     .action(async (account, opts) => {
       applyGlobals();
-      const res = await auth.login({ account: account || globalOptions.account || 'main', timeoutSec: Number(opts.timeout), headless: globalOptions.headless });
+      const acct = account || globalOptions.account || 'main';
+      if (opts.from) {
+        const res = await auth.importSession({ account: acct, file: opts.from });
+        printResult(res, (r) => (r.ok ? 'Imported session for "' + r.account + '"' + (r.handle ? ' as @' + r.handle : '') + ' ✔' : 'Import failed: ' + r.error));
+        process.exit(res.ok ? 0 : 1);
+        return;
+      }
+      const res = await auth.login({ account: acct, timeoutSec: Number(opts.timeout), headless: globalOptions.headless });
       printResult(res, (r) => 'Logged in' + (r.handle ? ' as @' + r.handle : '') + ' ✔');
     });
 
@@ -213,7 +225,7 @@ function buildProgram() {
     .option('--no-allow-stitch', 'disable stitches on this post')
     .option('--cover <seconds>', 'cover frame timestamp in seconds (best-effort)', null)
     .option('--timeout <seconds>', 'give up after N seconds (default: no timeout)', null)
-    .option('--dry-run', 'validate inputs and print the plan without posting')
+    .option('--retries <n>', 'retry failed posts up to N times (default: 0)', '0')
     .action(runPost);
 
   program
@@ -222,10 +234,19 @@ function buildProgram() {
     .option('--limit <n>', 'max posts', '20')
     .option('-q, --query <text>', 'filter by caption text or post id', null)
     .option('--sort <mode>', 'sort: new | top | liked', 'new')
+    .option('--scheduled', 'only show scheduled posts')
+    .option('--export <file>', 'write posts as CSV to <file>', null)
     .action(async (account, opts) => {
       applyGlobals();
       const { listPostsApi } = require('./posts');
-      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), query: opts.query, sort: opts.sort, headless: globalOptions.headless });
+      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), query: opts.query, sort: opts.sort, scheduledOnly: Boolean(opts.scheduled), headless: globalOptions.headless });
+      if (res.ok && opts.export) {
+        try {
+          const rows = res.items.map((it) => ({ id: it.id, date: it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '', caption: it.caption, views: it.stats.views, likes: it.stats.likes, comments: it.stats.comments, shares: it.stats.shares, url: 'https://www.tiktok.com/@' + (res.handle || '') + '/video/' + it.id }));
+          require('fs').writeFileSync(opts.export, utils.toCsv(rows, ['id', 'date', 'caption', 'views', 'likes', 'comments', 'shares', 'url']));
+          res.exported = opts.export;
+        } catch (err) { res.exportError = err.message; }
+      }
       printResult(res, (r) => {
         const lines = ['Posts on @' + (r.handle || r.account || '?') + ' (' + r.items.length + '):'];
         for (const it of r.items) {
@@ -235,6 +256,8 @@ function buildProgram() {
           lines.push('  ' + it.id + '  ' + when + '  ' + (it.caption || '(no caption)').slice(0, 40) + sched);
           lines.push('      views ' + (s.views != null ? s.views : '?') + ' · likes ' + (s.likes != null ? s.likes : '?') + ' · comments ' + (s.comments != null ? s.comments : '?') + ' · shares ' + (s.shares != null ? s.shares : '?') + (it.inReview ? '  [in review]' : ''));
         }
+        if (r.exported) lines.push('  csv: ' + r.exported);
+        if (r.exportError) lines.push('  export error: ' + r.exportError);
         if (r.error) lines.push('  error: ' + r.error);
         return lines.join('\n');
       });
@@ -408,6 +431,45 @@ function buildProgram() {
     });
 
   program
+    .command('hook')
+    .description('Generate viral hooks for a niche (offline, for faceless scripts).')
+    .option('--niche <name>', 'ai | money | fitness | story | tech', 'ai')
+    .option('--count <n>', 'how many hooks', '5')
+    .option('--seed <s>', 'seed for reproducible output', 'captron')
+    .action((opts) => {
+      applyGlobals();
+      const { generateHooks, hookCaption } = require('./hooks');
+      const items = generateHooks({ niche: opts.niche, count: Number(opts.count), seed: opts.seed });
+      printResult({ ok: true, niche: opts.niche, items }, (r) => {
+        const lines = ['Hooks (' + r.niche + '):'];
+        r.items.forEach((h, i) => lines.push('  ' + (i + 1) + '. ' + h.hook + '\n     caption: ' + hookCaption({ hook: h.hook }).replace(/\n/g, ' ')));
+        return lines.join('\n');
+      });
+    });
+
+  program
+    .command('audit [account]')
+    .description('Account health check: totals, averages, top + flop posts.')
+    .option('--limit <n>', 'posts to scan', '20')
+    .action(async (account, opts) => {
+      applyGlobals();
+      const { listPostsApi } = require('./posts');
+      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), headless: globalOptions.headless });
+      if (!res.ok) { printResult(res, (r) => 'Audit failed: ' + r.error); process.exit(1); }
+      const items = res.items;
+      const sum = (f) => items.reduce((a, it) => a + ((it.stats && it.stats[f]) || 0), 0);
+      const avg = (f) => (items.length ? Math.round(sum(f) / items.length) : 0);
+      const top = [...items].sort((a, b) => b.stats.views - a.stats.views).slice(0, 3);
+      const flops = [...items].sort((a, b) => a.stats.views - b.stats.views).slice(0, 3).filter((it) => it.stats.views < avg('views'));
+      const noCaption = items.filter((it) => !(it.caption || '').trim());
+      const out = { ok: true, account: res.account, handle: res.handle, scanned: items.length, totals: { views: sum('views'), likes: sum('likes'), comments: sum('comments'), shares: sum('shares') }, averages: { views: avg('views'), likes: avg('likes') }, top: top.map((t) => t.id), flops: flops.map((t) => t.id), noCaption: noCaption.length };
+      printResult(out, (r) => {
+        const lines = ['Audit @' + (r.handle || r.account) + ' (' + r.scanned + ' posts):', '  totals:   ' + r.totals.views + ' views · ' + r.totals.likes + ' likes · ' + r.totals.comments + ' comments', '  averages: ' + r.averages.views + ' views/post', '  top:      ' + (r.top.join(', ') || '—'), '  flops:    ' + (r.flops.join(', ') || '—') + (r.noCaption ? '   (' + r.noCaption + ' posts have no caption!)' : '')];
+        return lines.join('\n');
+      });
+    });
+
+  program
     .command('delete <postId>')
     .description('Delete a published post by id (requires --yes).')
     .option('--yes', 'confirm deletion')
@@ -508,7 +570,7 @@ function buildProgram() {
       const script = [
         '# captron completion (bash + zsh)',
         '# usage: eval "$(captron completion)"',
-        '_captron_cmds="login logout whoami accounts post posts content analytics download drafts batch delete trending hashtags comments config new doctor completion"',
+        '_captron_cmds="login logout whoami accounts post posts content analytics audit hook download drafts batch delete trending hashtags comments config new doctor completion"',
         'if [ -n "$BASH_VERSION" ]; then',
         '  _captron() { local cur="${COMP_WORDS[COMP_CWORD]}"; COMPREPLY=($(compgen -W "$_captron_cmds" -- "$cur")); }',
         '  complete -F _captron captron',

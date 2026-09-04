@@ -151,3 +151,25 @@ test('batch: buildPlan carries interaction flags', () => {
   assert.equal(plan[0].allowDuet, true);
   assert.equal(plan[0].cover, 2.5);
 });
+
+test('hooks: deterministic for same seed, all niches valid', () => {
+  const { generateHooks, hookCaption, NICHES } = require('../../src/hooks');
+  const a = generateHooks({ niche: 'ai', count: 3, seed: 's1' });
+  const b = generateHooks({ niche: 'ai', count: 3, seed: 's1' });
+  assert.deepEqual(a, b);
+  assert.equal(a.length, 3);
+  for (const n of Object.keys(NICHES)) {
+    const h = generateHooks({ niche: n, count: 1, seed: 's' });
+    assert.ok(h[0].hook.length > 10);
+  }
+  const cap = hookCaption({ hook: 'Test hook', hashtags: 'ai,fyp' });
+  assert.ok(cap.includes('#ai'));
+});
+
+test('cli: buildProgram lists all commands', () => {
+  const { buildProgram } = require('../../src/cli');
+  const names = buildProgram().commands.map((c) => c.name());
+  for (const need of ['login', 'post', 'posts', 'download', 'analytics', 'batch', 'drafts', 'delete', 'trending', 'hashtags', 'comments', 'config', 'new', 'hook', 'audit', 'completion', 'doctor']) {
+    assert.ok(names.includes(need), 'missing command ' + need);
+  }
+});

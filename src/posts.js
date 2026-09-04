@@ -70,7 +70,7 @@ function normalizeItem(it) {
 }
 
 /** Fetch up to `limit` posts with stats (auto-paginates in size-50 batches). */
-async function listPostsApi({ account = 'main', limit = 20, headless = false, query = null, sort = 'new' } = {}) {
+async function listPostsApi({ account = 'main', limit = 20, headless = false, query = null, sort = 'new', scheduledOnly = false } = {}) {
   const context = await launchProfile({ account, headless });
   try {
     if (!(await isLoggedIn(context))) return { ok: false, error: 'not logged in', account, handle: null, items: [] };
@@ -102,6 +102,7 @@ async function listPostsApi({ account = 'main', limit = 20, headless = false, qu
       if (hasMore) await sleep(600);
     }
     let out = items;
+    if (scheduledOnly) out = out.filter((it) => it.scheduledTime);
     if (query) {
       const q = String(query).toLowerCase();
       out = out.filter((it) => (it.caption || '').toLowerCase().includes(q) || String(it.id).includes(q));

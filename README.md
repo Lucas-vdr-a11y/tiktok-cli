@@ -37,16 +37,18 @@ captron content          # lists posts + drafts
 
 | Command | What it does |
 |---|---|
-| `login [account]` | Log in via QR code. State persists in `~/.captron/profiles/<account>`. |
+| `login [account]` | Log in via QR code, or `login --from seed.json` to import a browser session non-interactively. State persists in `~/.captron/profiles/<account>`. |
 | `logout [account]` | Clear a saved session. |
 | `whoami [account]` | Show session status + handle. |
 | `accounts` | List configured account profiles. |
-| `post <video> [options]` | Upload + caption + publish (or draft) in one action. Use `--slideshow` for images. |
+| `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--retries 2` retries failures. Use `--slideshow` for images. |
 | `post <video> --slideshow <paths>` | Upload a slideshow of images (comma-separated, up to 10). |
-| `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. `--query` filters, `--sort top` ranks. |
+| `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--export posts.csv`. |
 | `download [postId]` | Download one of your published videos (default: most recent). `--all --limit 10 --out-dir ./clips` for bulk. |
 | `content [account]` | Posts + drafts in one call. |
 | `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`, CSV via `--export out.csv`). |
+| `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. |
+| `hook` | Offline viral hook generator (`--niche ai|money|fitness|story|tech --count 5 --seed x`). |
 | `drafts [account]` | List drafts; `--publish <id>` / `--delete <id>`. |
 | `delete <postId> --yes` | Delete a published post (safety catch required). |
 | `trending` | Trending hashtags from Explore (caption research). |
@@ -72,6 +74,7 @@ captron content          # lists posts + drafts
 --allow-stitch / --no-allow-stitch          Toggle stitches
 --cover <seconds>          Cover frame timestamp (best-effort)
 --timeout <seconds>        Give up after N seconds
+--retries <n>              Retry failed posts up to N times
 --dry-run                  Validate inputs without posting
 --headless                 Run browser headless (or CAPTRON_HEADLESS=1)
 --json                     Machine-readable output (or CAPTRON_JSON=1)
@@ -110,10 +113,13 @@ Example `manifest.json`:
 ## Research (for faceless creators)
 
 ```bash
+captron hook --niche money --count 5 --seed ep1   # offline viral hooks for scripts
 captron trending --limit 20        # what's hot on Explore right now
 captron hashtags ai --limit 10     # view count + related tags for #ai
 captron posts --sort top --limit 5 # your best performers first
+captron posts --scheduled          # what's queued
 captron analytics --days 28 --export metrics.csv --posts 5
+captron audit --limit 20           # totals, top/flops, caption gaps
 captron comments --limit 20        # who replied to you
 ```
 
