@@ -69,8 +69,28 @@ function normalizeItem(it) {
   };
 }
 
+/**
+ * Pure post filtering/sorting (unit-tested). `since` accepts anything
+ * Date.parse understands ("2026-08-01", ISO datetime); invalid → ignored.
+ */
+function filterPosts(items, { query = null, sort = 'new', scheduledOnly = false, since = null } = {}) {
+  let out = items || [];
+  if (scheduledOnly) out = out.filter((it) => it.scheduledTime);
+  if (since) {
+    const ts = Date.parse(since);
+    if (Number.isFinite(ts)) out = out.filter((it) => it.createTime && it.createTime >= ts);
+  }
+  if (query) {
+    const q = String(query).toLowerCase();
+    out = out.filter((it) => (it.caption || '').toLowerCase().includes(q) || String(it.id).includes(q));
+  }
+  if (sort === 'top') out = [...out].sort((a, b) => (b.stats.views || 0) - (a.stats.views || 0));
+  else if (sort === 'liked') out = [...out].sort((a, b) => (b.stats.likes || 0) - (a.stats.likes || 0));
+  return out;
+}
+
 /** Fetch up to `limit` posts with stats (auto-paginates in size-50 batches). */
-async function listPostsApi({ account = 'main', limit = 20, headless = false, query = null, sort = 'new', scheduledOnly = false } = {}) {
+async function listPostsApi({ account = 'main', limit = 20, headless = false, query = null, sort = 'new', scheduledOnly = false, since = null } = {}) {
   const context = await launchProfile({ account, headless });
   try {
     if (!(await isLoggedIn(context))) return { ok: false, error: 'not logged in', account, handle: null, items: [] };
@@ -101,15 +121,7 @@ async function listPostsApi({ account = 'main', limit = 20, headless = false, qu
       cursor = Number(body.cursor) || cursor + 50;
       if (hasMore) await sleep(600);
     }
-    let out = items;
-    if (scheduledOnly) out = out.filter((it) => it.scheduledTime);
-    if (query) {
-      const q = String(query).toLowerCase();
-      out = out.filter((it) => (it.caption || '').toLowerCase().includes(q) || String(it.id).includes(q));
-    }
-    if (sort === 'top') out = [...out].sort((a, b) => (b.stats.views || 0) - (a.stats.views || 0));
-    else if (sort === 'liked') out = [...out].sort((a, b) => (b.stats.likes || 0) - (a.stats.likes || 0));
-    out = out.slice(0, Number(limit) || 20);
+    const out = filterPosts(items, { query, sort, scheduledOnly, since }).slice(0, Number(limit) || 20);
     return { ok: true, account, handle, items: out, total: items.length };
   } finally {
     await context.close().catch(() => {});
@@ -184,5 +196,5 @@ async function deletePost({ account = 'main', postId, headless = false, yes = fa
  * the video stream the Studio grid plays, because the pre-signed `download_info`
  * URLs can 403 for non-browser clients and the play-API URL needs session cookies.
  */
-module.exports = { listPostsApi, fetchItemPage, normalizeItem, deletePost };
+module.exports = { listPostsApi, fetchItemPage, normalizeItem, filterPosts, deletePost };
 

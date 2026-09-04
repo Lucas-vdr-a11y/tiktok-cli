@@ -122,6 +122,54 @@ async function whoami({ account = 'main' } = {}) {
   return { account, loggedIn: true, handle: handle ? handle.replace(/^\/@?/, '') : null, uid: uid ? uid.value : null };
 }
 
+/**
+ * `captron whoami --all` — session status for every known account.
+ * Sequential launches (one context at a time); a broken profile reports
+ * ok:false for that row instead of failing the whole sweep.
+ */
+async function whoamiAll({ headless = true } = {}) {
+  const list = accounts();
+  const rows = [];
+  for (const a of list.accounts) {
+    try {
+      const context = await launchProfile({ account: a.name, headless });
+      try {
+        if (!(await isLoggedIn(context))) {
+          rows.push({ account: a.name, loggedIn: false, handle: null });
+          continue;
+        }
+        const page = await context.newPage();
+        await page.goto(URLS.creatorCenter, { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await sleep(2500);
+        const handle = await resolveHandle(page).catch(() => null);
+        rows.push({ account: a.name, loggedIn: true, handle: handle ? handle.replace(/^\/@?/, '') : null });
+      } finally {
+        await context.close().catch(() => {});
+      }
+    } catch (err) {
+      rows.push({ account: a.name, loggedIn: false, handle: null, error: String(err.message).split('\n')[0] });
+    }
+  }
+  return { ok: true, activeAccount: list.activeAccount, accounts: rows };
+}
+
+/**
+ * Resolve fan-out target accounts for `post --to a,b --all`.
+ * Pure apart from reading config for `--all`. Returns deduped names.
+ * `fallback` is used when neither flag is given (default single account).
+ */
+function resolveTargets({ to = null, all = false, fallback = 'main' } = {}) {
+  if (all) {
+    const list = accounts().accounts.map((a) => a.name);
+    return [...new Set(list.length ? list : [fallback || 'main'])];
+  }
+  if (to) {
+    const names = String(to).split(',').map((s) => s.trim()).filter(Boolean);
+    if (!names.length) throw new Error('empty --to list (usage: --to alice,bob)');
+    return [...new Set(names)];
+  }
+  return [fallback || 'main'];
+}
 /** `captron logout [--account]` */
 async function logout({ account = 'main' } = {}) {
   const context = await launchProfile({ account });
@@ -227,4 +275,4 @@ async function importSession({ account = 'main', file } = {}) {
   }
 }
 
-module.exports = { isLoggedIn, login, logout, whoami, accounts, useAccount, importSession };
+module.exports = { isLoggedIn, login, logout, whoami, whoamiAll, accounts, useAccount, resolveTargets, importSession };

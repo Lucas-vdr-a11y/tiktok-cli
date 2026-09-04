@@ -20,13 +20,13 @@ captron post <video> --caption "text" --hashtags "tag1,tag2"
 This single command does the whole pipeline: upload → caption → (confirm modal) → publish. Returns JSON with `itemId`, `status`, `ok`.
 
 - `captron login [account]` — log in via QR; `--from seed.json` imports a session non-interactively
-- `captron whoami [account]` — session status + handle
+- `captron whoami [--all]` — session status (`--all` sweeps every profile)
 - `captron accounts` — list profiles; `captron use <account>` switches active (instant, offline)
-- `captron post <video> [opts]` — upload + publish (or draft); `--retries 2` retries failures, `--auto-fit` normalizes video first, `--strict` fails on warnings
+- `captron post <video> [opts]` — upload + publish (or draft); `--to alice,bob` / `--all` fans out to many accounts, `--retries 2` retries, `--auto-fit` normalizes first, `--strict` fails on warnings
 - `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
 - `captron probe <file>` — offline TikTok-readiness check (size, codec, duration, verdict)
 - `captron fit <input> -o <out>` — normalize to vertical 1080x1920 H.264/AAC via ffmpeg
-- `captron posts [account] --query <text> --sort top|liked --scheduled --export posts.csv` — posts with stats + download URLs
+- `captron posts [account] --query <text> --sort top|liked --scheduled --since 2026-08-01 --export posts.csv` — posts with stats + download URLs
 - `captron content [account]` — posts + drafts in one call
 - `captron sync [account] --days 7 --limit 20 --comments 5 --out sync.json` — posts + analytics + comments in ONE browser session (daily digest)
 - `captron calendar --days 14` — scheduled queue grouped by day
@@ -41,7 +41,7 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron trending --limit 20` — trending hashtags (caption research)
 - `captron hashtags <tag>` — hashtag detail + related tags
 - `captron comments --limit 20` — recent comments (best-effort)
-- `captron batch <manifest> [--delay 20 --jitter 8 --probe --retries 2 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many; `--probe` pre-flights, `--retries` retries each item
+- `captron batch <manifest> [--delay 20 --jitter 8 --probe --auto-fit --retries 2 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many; `--probe` pre-flights, `--auto-fit` normalizes, `--retries` retries each item; per-item `"account"` mixes accounts
 - `captron update [--check]` — check/install latest from npm (`--check` reports only)
 - `captron clean [--dry-run]` — free disk: prune Chromium caches (sessions kept)
 - `captron doctor [--fix] [--offline]` — environment check (profile sizes + npm update check); `--fix` clears locks, `--offline` skips browsers

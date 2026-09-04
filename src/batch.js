@@ -78,8 +78,22 @@ function validateSpec(s, scheduleDate) {
 }
 
 /** Run a batch: post every spec, respecting per-account sessions + delay. */
-async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, jitterSec = 0, strict = false, probe = false, retries = 0, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
+async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, jitterSec = 0, strict = false, probe = false, autoFit = false, retries = 0, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
   let specs = parseManifest(manifest);
+  if (autoFit) {
+    const { probeFile, fitFile } = require('./media');
+    for (const s of specs) {
+      if (!s.video) continue;
+      let pr = null;
+      try { pr = probeFile(s.video); } catch (_) { /* advisory */ }
+      if (!pr || pr.kind !== 'video') continue;
+      if (!(pr.warnings || []).some((w) => /landscape|codec|vertical/i.test(w))) continue;
+      const fitted = fitFile({ input: s.video });
+      if (!fitted.ok) throw new Error('auto-fit failed for ' + s.video + ': ' + fitted.error);
+      info('Auto-fitted ' + s.video + ' -> ' + fitted.output);
+      s.video = fitted.output;
+    }
+  }
   if (shuffle) {
     for (let i = specs.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));

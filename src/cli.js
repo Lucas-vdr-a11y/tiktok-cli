@@ -112,62 +112,89 @@ async function runPost(videoArg, opts) {
   const allowDuet = opts.allowDuet != null ? Boolean(opts.allowDuet) : null;
   const allowStitch = opts.allowStitch != null ? Boolean(opts.allowStitch) : null;
   void parseFlag;
-  if (opts.dryRun) {
-    printResult({ ok: true, dryRun: true, account: globalOptions.account, video: isSlideshow ? slideshowPaths.join(',') : vcheck.path, caption, schedule: scheduleDate ? scheduleDate.toISOString() : null, visibility: opts.visibility || 'everyone', saveDraft: Boolean(opts.draft) }, (r) => 'Dry run — nothing posted.\n  video: ' + r.video + '\n  caption: ' + (r.caption || '(empty)') + '\n  schedule: ' + (r.schedule || 'now'));
-    return;
-  }
-  utils.step('Posting to account "' + globalOptions.account + '"');
-  if (isSlideshow) utils.step('Mode: SLIDESHOW (' + slideshowPaths.length + ' images)');
-  if (caption) utils.step('Caption: ' + caption.replace(/\n/g, ' | ').slice(0, 160));
-  if (opts.schedule) utils.step('Scheduled for: ' + formatDate(scheduleDate));
-  if (opts.draft) utils.step('Mode: save DRAFT (no publish)');
-  const timeoutMs = opts.timeout ? Number(opts.timeout) * 1000 : 0;
-  const context = await browserMod.launchProfile({ account: globalOptions.account, headless: globalOptions.headless });
-  const started = Date.now();
-  let result;
+  let targets;
   try {
-    const attempt = () => uploadLib.performPost({
-      context,
-      videoPath: isSlideshow ? null : vcheck.path,
-      slideshow: isSlideshow ? slideshowPaths : undefined,
-      caption,
-      schedule: scheduleDate,
-      visibility: opts.visibility,
-      saveDraft: opts.draft || false,
-      allowComment,
-      allowDuet,
-      allowStitch,
-      cover: opts.cover != null ? Number(opts.cover) : null,
-    });
-    const withTimeout = (p) => (timeoutMs > 0 ? utils.withTimeout(p, timeoutMs, 'post timed out after ' + opts.timeout + 's') : p);
-    const retries = Math.max(0, Number(opts.retries) || 0);
-    result = retries > 0
-      ? await utils.retry(async () => withTimeout(attempt()), { tries: retries + 1, delayMs: 5000, onRetry: (e) => utils.warn('retrying after: ' + String(e.message).split('\n')[0]) })
-      : await withTimeout(attempt());
+    targets = auth.resolveTargets({ to: opts.to, all: opts.all, fallback: globalOptions.account });
   } catch (err) {
-    uploadLib.handlePostError(err);
-    return;
-  } finally {
-    await context.close().catch(() => {});
+    utils.fail(err.message);
+    process.exit(1);
   }
-  result.account = globalOptions.account;
-  result.video = isSlideshow ? slideshowPaths.join(',') : vcheck.path;
-  result.durationSec = Math.round((Date.now() - started) / 1000);
-  printResult(result, (r) => {
-    const lines = [
-      '',
-      r.ok ? 'Post ' + r.status + ' ✔' : 'Post status: ' + (r.status || 'unknown'),
-      '  ' + (r.slideshow ? 'slideshow (' + r.slideshow + ' images)' : 'video:') + ' ' + r.video,
-      '  account:   ' + r.account,
-      r.itemId ? '  item id:   ' + r.itemId : '',
-      r.projectId ? '  project:   ' + r.projectId : '',
-      r.url ? '  url:       ' + r.url : '',
-      '  took:      ' + humanize(r.durationSec),
-      r.failed ? '  error:     ' + r.error : '',
-    ];
-    return lines.filter(Boolean).join('\n');
+  const fanout = targets.length > 1;
+  if (opts.dryRun) {
+    printResult({ ok: true, dryRun: true, accounts: targets, video: isSlideshow ? slideshowPaths.join(',') : vcheck.path, caption, schedule: scheduleDate ? scheduleDate.toISOString() : null, visibility: opts.visibility || 'everyone', saveDraft: Boolean(opts.draft) }, (r) => 'Dry run — nothing posted.\n  video: ' + r.video + '\n  accounts: ' + r.accounts.join(', ') + '\n  caption: ' + (r.caption || '(empty)') + '\n  schedule: ' + (r.schedule || 'now'));
+    return;
+  }
+  const timeoutMs = opts.timeout ? Number(opts.timeout) * 1000 : 0;
+  const retries = Math.max(0, Number(opts.retries) || 0);
+  const results = [];
+  for (const acct of targets) {
+    utils.step('Posting to account "' + acct + '"' + (fanout ? ' [' + (results.length + 1) + '/' + targets.length + ']' : ''));
+    if (isSlideshow) utils.step('Mode: SLIDESHOW (' + slideshowPaths.length + ' images)');
+    if (caption) utils.step('Caption: ' + caption.replace(/\n/g, ' | ').slice(0, 160));
+    if (opts.schedule) utils.step('Scheduled for: ' + formatDate(scheduleDate));
+    if (opts.draft) utils.step('Mode: save DRAFT (no publish)');
+    const context = await browserMod.launchProfile({ account: acct, headless: globalOptions.headless });
+    const started = Date.now();
+    let result;
+    try {
+      const attempt = () => uploadLib.performPost({
+        context,
+        videoPath: isSlideshow ? null : vcheck.path,
+        slideshow: isSlideshow ? slideshowPaths : undefined,
+        caption,
+        schedule: scheduleDate,
+        visibility: opts.visibility,
+        saveDraft: opts.draft || false,
+        allowComment,
+        allowDuet,
+        allowStitch,
+        cover: opts.cover != null ? Number(opts.cover) : null,
+      });
+      const withTimeout = (p) => (timeoutMs > 0 ? utils.withTimeout(p, timeoutMs, 'post timed out after ' + opts.timeout + 's') : p);
+      result = retries > 0
+        ? await utils.retry(async () => withTimeout(attempt()), { tries: retries + 1, delayMs: 5000, onRetry: (e) => utils.warn('retrying after: ' + String(e.message).split('\n')[0]) })
+        : await withTimeout(attempt());
+    } catch (err) {
+      result = { ok: false, failed: true, error: err.message, account: acct };
+      utils.fail('[' + acct + '] ' + err.message);
+      if (!fanout) {
+        await context.close().catch(() => {});
+        uploadLib.handlePostError(err);
+        return;
+      }
+    } finally {
+      await context.close().catch(() => {});
+    }
+    result.account = acct;
+    result.video = isSlideshow ? slideshowPaths.join(',') : vcheck.path;
+    result.durationSec = Math.round((Date.now() - started) / 1000);
+    results.push(result);
+  }
+  if (!fanout) {
+    const result = results[0];
+    printResult(result, (r) => {
+      const lines = [
+        '',
+        r.ok ? 'Post ' + r.status + ' ✔' : 'Post status: ' + (r.status || 'unknown'),
+        '  ' + (r.slideshow ? 'slideshow (' + r.slideshow + ' images)' : 'video:') + ' ' + r.video,
+        '  account:   ' + r.account,
+        r.itemId ? '  item id:   ' + r.itemId : '',
+        r.projectId ? '  project:   ' + r.projectId : '',
+        r.url ? '  url:       ' + r.url : '',
+        '  took:      ' + humanize(r.durationSec),
+        r.failed ? '  error:     ' + r.error : '',
+      ];
+      return lines.filter(Boolean).join('\n');
+    });
+    process.exit(result.failed ? 1 : 0);
+  }
+  const okCount = results.filter((r) => r.ok && !r.failed).length;
+  printResult({ ok: okCount === results.length, okCount, total: results.length, results }, (r) => {
+    const lines = ['Fan-out: ' + r.okCount + '/' + r.total + ' ok'];
+    for (const it of r.results) lines.push('  ' + (it.ok && !it.failed ? '✔' : '✖') + ' @' + it.account + (it.itemId ? '  -> /video/' + it.itemId : it.error ? '  ' + it.error : ''));
+    return lines.join('\n');
   });
-  process.exit(result.failed ? 1 : 0);
+  process.exit(okCount === results.length ? 0 : 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -219,9 +246,19 @@ function buildProgram() {
 
   program
     .command('whoami [account]')
-    .description('Show session status for an account.')
-    .action(async (account) => {
+    .description('Show session status for an account (--all sweeps every profile).')
+    .option('--all', 'check every known account (sequential)')
+    .action(async (account, opts) => {
       applyGlobals();
+      if (opts.all) {
+        const res = await auth.whoamiAll({ headless: globalOptions.headless });
+        printResult(res, (r) => {
+          const lines = ['Accounts (' + r.accounts.length + '):'];
+          for (const a of r.accounts) lines.push('  ' + (a.loggedIn ? '✔' : '✖') + ' ' + a.account + (a.handle ? '  @' + a.handle : '') + (a.error ? '  (' + a.error + ')' : ''));
+          return lines.join('\n');
+        });
+        return;
+      }
       const res = await auth.whoami({ account: account || globalOptions.account || 'main' });
       printResult(res, (r) => (r.loggedIn ? 'Logged in as @' + (r.handle || '?') + (r.uid ? ' (uid ' + r.uid + ')' : '') : 'Not logged in'));
     });
@@ -289,7 +326,10 @@ function buildProgram() {
     .option('--timeout <seconds>', 'give up after N seconds (default: no timeout)', null)
     .option('--retries <n>', 'retry failed posts up to N times (default: 0)', '0')
     .option('--auto-fit', 'normalize landscape/odd codecs to 1080x1920 via ffmpeg before uploading')
+    .option('--to <accounts>', 'fan-out: post to several accounts --to alice,bob (sequential)', null)
+    .option('--all', 'fan-out: post to every known account (sequential)')
     .option('--strict', 'fail on validation warnings (long caption, large file)')
+    .option('--dry-run', 'validate inputs and print the plan without posting')
     .action(runPost);
 
   program
@@ -299,11 +339,12 @@ function buildProgram() {
     .option('-q, --query <text>', 'filter by caption text or post id', null)
     .option('--sort <mode>', 'sort: new | top | liked', 'new')
     .option('--scheduled', 'only show scheduled posts')
+    .option('--since <date>', 'only posts on/after date (YYYY-MM-DD)', null)
     .option('--export <file>', 'write posts as CSV to <file>', null)
     .action(async (account, opts) => {
       applyGlobals();
       const { listPostsApi } = require('./posts');
-      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), query: opts.query, sort: opts.sort, scheduledOnly: Boolean(opts.scheduled), headless: globalOptions.headless });
+      const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), query: opts.query, sort: opts.sort, scheduledOnly: Boolean(opts.scheduled), since: opts.since, headless: globalOptions.headless });
       if (res.ok && opts.export) {
         try {
           const rows = res.items.map((it) => ({ id: it.id, date: it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '', caption: it.caption, views: it.stats.views, likes: it.stats.likes, comments: it.stats.comments, shares: it.stats.shares, url: 'https://www.tiktok.com/@' + (res.handle || '') + '/video/' + it.id }));
@@ -427,6 +468,7 @@ function buildProgram() {
     .option('--delay <seconds>', 'seconds to wait between posts', '0')
     .option('--jitter <seconds>', 'random extra delay 0..N between posts (rate-limit friendly)', '0')
     .option('--probe', 'pre-flight: probe every video for codec/duration issues (offline)')
+    .option('--auto-fit', 'normalize landscape/odd codecs via ffmpeg before posting')
     .option('--max-per-day <n>', 'hard cap on posts per run', '0')
     .option('--dry-run', 'validate the manifest and print the plan without posting')
     .option('--strict', 'fail manifests with validation warnings')
@@ -444,6 +486,7 @@ function buildProgram() {
         delaySec: Number(opts.delay),
         jitterSec: Number(opts.jitter),
         probe: Boolean(opts.probe),
+        autoFit: Boolean(opts.autoFit),
         strict: Boolean(opts.strict),
         dryRun: opts.dryRun || false,
         headless: globalOptions.headless,

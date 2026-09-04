@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0 — 2026-09-04
+
+Multi-account fan-out wave (99 tests pass).
+
+- `post --to alice,bob` / `post --all` — publish one video to many
+  accounts in a single command (sequential launches, per-account
+  results, fan-out summary; single-account output unchanged).
+- `whoami --all` — session status sweep across every profile
+  (`auth.whoamiAll`, per-row errors instead of one failure).
+- `posts --since YYYY-MM-DD` — date filtering via a pure tested
+  `filterPosts` helper (query/sort/scheduled/since compose).
+- `batch --auto-fit` — normalize landscape/odd codecs per item before
+  posting (runs pre-plan, so fitted paths validate cleanly).
+- `auth.resolveTargets` — shared, tested fan-out resolution
+  (dedupes, rejects empty `--to`, falls back to active account).
+
 ## 0.9.0 — 2026-09-04
 
 Resilience + flow wave (93 tests pass).
