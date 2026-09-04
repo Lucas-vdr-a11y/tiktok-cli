@@ -25,6 +25,7 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron whoami [account]` — session status + handle
 - `captron accounts` — list profiles
 - `captron post <video> [opts]` — upload + publish (or draft)
+- `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
 - `captron posts [account]` — list published posts with per-post stats + download URLs
 - `captron content [account]` — posts + drafts in one call
 - `captron analytics [account] --days <1|7|28|60> --posts <n>` — account metrics + recent posts w/ stats in one call
@@ -40,6 +41,7 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `-s, --schedule <when>` — `"YYYY-MM-DD HH:mm"` | `"tomorrow HH:mm"` | `"today HH:mm"` | `"+2h"` | `"+3d"`
 - `-v, --visibility <who>` — `everyone` | `friends` | `private`
 - `-d, --draft` — save as draft instead of publishing
+- `--slideshow <paths>` — comma-separated image paths (up to 10) for a slideshow; overrides `<video>`
 - `--headless` — run browser without a window
 - `--json` — machine-readable output (use this in scripts/agents)
 - `-a, --account <name>` — pick account profile

@@ -41,7 +41,8 @@ captron content          # lists posts + drafts
 | `logout [account]` | Clear a saved session. |
 | `whoami [account]` | Show session status + handle. |
 | `accounts` | List configured account profiles. |
-| `post <video> [options]` | Upload + caption + publish (or draft) in one action. |
+| `post <video> [options]` | Upload + caption + publish (or draft) in one action. Use `--slideshow` for images. |
+| `post <video> --slideshow <paths>` | Upload a slideshow of images (comma-separated, up to 10). |
 | `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. |
 | `download [postId]` | Download one of your published videos (default: most recent). |
 | `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`) — `analytics --posts 5`. |
@@ -57,6 +58,7 @@ captron content          # lists posts + drafts
 -s, --schedule <when>      Schedule: "YYYY-MM-DD HH:mm" | "tomorrow HH:mm" | "today HH:mm" | "+2h" | "+3d"
 -v, --visibility <who>     everyone | friends | private
 -d, --draft                Save as draft instead of publishing
+--slideshow <paths>        Comma-separated image paths for a slideshow (up to 10). Overrides <video>.
 --headless                 Run browser headless
 --json                     Machine-readable output
 -a, --account <name>       Account profile to use

@@ -100,6 +100,24 @@ is_pinned, status (102 = published/live), cover_url[], download_info.download_ur
   with `referer`. See `src/download.js`.
 - Used by `captron posts` (rich listing w/ stats) and `captron download`.
   DOM scraping remains the fallback for drafts (item_list does not return them).
+
+## Slideshow (photo) upload flow
+
+TikTok Studio supports posting up to **10 images** as a slideshow. The flow differs from video:
+
+1. **Navigate** to `https://www.tiktok.com/tiktokstudio/upload?tab=photo`
+2. **Switch to Photos tab** — the upload toolbar has a `Photos` button (detected by text). Clicking it toggles the upload mode from video to photo.
+3. **File input changes** — after switching, `document.querySelector('input[type="file"]')` has:
+   - `accept: "image/jpg,image/jpeg,image/png,image/webp"`
+   - `multiple: true`
+4. **Set files** — `page.setInputFiles(selector, [path1, path2, ...])` sets all images at once (max 10).
+5. **Editor** — the same caption/schedule/publish flow applies. The publish RPC and content-check pipeline are identical to video.
+
+Key selectors:
+- `URLS.uploadPhoto` = `https://www.tiktok.com/tiktokstudio/upload?tab=photo`
+- `SELECTORS.photoTab` = `button[aria-label*="Photo" i], ...`
+- File input detection for photo mode: `el.accept` contains `image/` and `el.multiple === true`.
+
 ## Localization
 
 TikTok Studio localizes both labels and endpoints. Captron matches on stable attributes (input names, radio values) and falls back to a table of common labels in EN/NL/ES/FR/DE/PT/ZH/JA/KO. The schedule radio is `input[name="postSchedule"][value="schedule"]`; the publish button is the button whose text is one of `Post/Plaatsen/Publicar/Publier/...`.
