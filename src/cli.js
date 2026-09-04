@@ -179,8 +179,9 @@ function buildProgram() {
         const lines = ['Posts on @' + (r.handle || r.account || '?') + ' (' + r.items.length + '):'];
         for (const it of r.items) {
           const s = it.stats || {};
-          const when = it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '?';
-          lines.push('  ' + it.id + '  ' + when + '  ' + (it.caption || '(no caption)').slice(0, 40));
+                    const when = it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '?';
+          const sched = it.scheduledTime ? '  [scheduled ' + new Date(it.scheduledTime).toISOString().slice(0, 16).replace('T', ' ') + ']' : '';
+          lines.push('  ' + it.id + '  ' + when + '  ' + (it.caption || '(no caption)').slice(0, 40) + sched);
           lines.push('      views ' + (s.views != null ? s.views : '?') + ' · likes ' + (s.likes != null ? s.likes : '?') + ' · comments ' + (s.comments != null ? s.comments : '?') + ' · shares ' + (s.shares != null ? s.shares : '?') + (it.inReview ? '  [in review]' : ''));
         }
         if (r.error) lines.push('  error: ' + r.error);

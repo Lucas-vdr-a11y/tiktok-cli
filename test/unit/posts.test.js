@@ -15,9 +15,10 @@ const RAW = {
   share_count: '5',
   favorite_count: '9',
   visibility: 1,
-  in_review: true,
+    in_review: true,
   is_pinned: false,
   status: 102,
+  schedule_time: '1788479735',
   cover_url: ['https://cdn.example/cover.jpg', 'https://cdn.example/cover2.jpg'],
   download_info: { allow_download: true, download_urls: ['https://cdn.example/a.mp4', 'https://cdn.example/b.mp4'] },
 };
@@ -32,11 +33,18 @@ test('normalizeItem: full raw item', () => {
   assert.equal(out.visibility, 'public');
   assert.equal(out.inReview, true);
   assert.equal(out.pinned, false);
-  assert.equal(out.coverUrl, 'https://cdn.example/cover.jpg');
+    assert.equal(out.coverUrl, 'https://cdn.example/cover.jpg');
   // download prefers the FIRST url — the pre-signed CDN variant is directly
   // fetchable; the trailing aweme/v1/play/ url rejects anonymous/other-UA clients
   assert.equal(out.downloadUrl, 'https://cdn.example/a.mp4');
   assert.deepEqual(out.downloadUrls, ['https://cdn.example/a.mp4', 'https://cdn.example/b.mp4']);
+  // schedule_time => scheduledTime (ms); non-zero becomes a future schedule
+  assert.equal(out.scheduledTime, 1788479735000);
+});
+
+test('normalizeItem: scheduledTime null when schedule_time missing', () => {
+  const out = normalizeItem({ item_id: '7', schedule_time: '0' });
+  assert.equal(out.scheduledTime, null);
 });
 
 test('normalizeItem: private visibility maps to private', () => {
