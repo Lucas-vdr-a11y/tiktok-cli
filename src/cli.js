@@ -210,6 +210,28 @@ function buildProgram() {
     });
 
   program
+    .command('analytics [account]')
+    .description('Account analytics: views, likes, comments, shares, followers, viewers — last N days.')
+    .option('-d, --days <n>', 'range: 1, 7, 28 or 60 days', '7')
+    .action(async (account, opts) => {
+      applyGlobals();
+      const { analytics } = require('./analytics');
+      const res = await analytics({ account: account || globalOptions.account || 'main', days: Number(opts.days), headless: globalOptions.headless });
+      printResult(res, (r) => {
+        const lines = ['Analytics for @' + (r.handle || r.account || '?') + ' (last ' + r.range_days + ' days):'];
+        for (const [name, m] of Object.entries(r.metrics || {})) {
+          if (!m) continue;
+          const delta = m.delta != null ? (m.delta >= 0 ? '+' : '') + m.delta : '';
+          const pct = m.percent_change != null ? ' (' + (m.percent_change >= 0 ? '+' : '') + m.percent_change + '%)' : '';
+          lines.push('  ' + name.padEnd(14) + String(m.total != null ? m.total : '—') + (delta ? '  ' + delta : '') + pct);
+        }
+        if (r.error) lines.push('  error: ' + r.error);
+        return lines.join('\n');
+      });
+      if (!res.ok) process.exit(1);
+    });
+
+  program
     .command('batch <manifest>')
     .description('Post (or draft) many videos from a JSON/CSV manifest — one command for a whole content pipeline.')
     .option('-d, --draft', 'save every item as draft instead of publishing')

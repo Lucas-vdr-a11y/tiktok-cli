@@ -12,6 +12,7 @@ const URLS = {
   upload: 'https://www.tiktok.com/tiktokstudio/upload',
   creatorCenter: 'https://www.tiktok.com/tiktokstudio',
   content: 'https://www.tiktok.com/tiktokstudio/content',
+  analytics: 'https://www.tiktok.com/tiktokstudio/analytics',
   login: 'https://www.tiktok.com/login',
 };
 
