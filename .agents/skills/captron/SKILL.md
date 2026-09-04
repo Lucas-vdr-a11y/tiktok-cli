@@ -71,5 +71,5 @@ done
 
 - `Not logged in` → run `captron login`
 - `Could not find a clickable Post button` → the editor may not have loaded; retry
-- `Timed out waiting for TikTok to confirm` → check `captron content` (the post may have gone live anyway); see screenshot at `/tmp/captron-confirm-timeout.png`
+- `Timed out waiting for TikTok to confirm` → check `captron content` (the post may have gone live anyway); re-run with `--verbose` for the publish RPC details
 - Stale session → `captron logout && captron login`
