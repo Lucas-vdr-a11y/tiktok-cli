@@ -10,8 +10,9 @@ Completely reverse engineer TikTok and develop a CLI (for agents) whose main use
 - Tests written and passing (44)
 - GitHub repo has regular commits and multiple merged PRs
 
-active — v0.3.0; post flags/cover, delete, trending/hashtags/comments, config/new/completion, bulk download, analytics CSV, resumable batch; 62 tests pass
+active — v0.4.0; 21 commands (post flags/cover/retries, delete, trending/hashtags/comments, config/new/completion, hook/audit, bulk download, analytics+posts CSV, resumable batch, login --from); 64 tests pass; PR #5 open
 
+- v0.4.0 NEW: `hook` (offline viral hooks, 5 niches, deterministic seed), `audit` (totals/top/flops/caption gaps), `login --from seed.json`, `posts --scheduled/--export`, `post --retries`; completion covers all commands (64/64 tests)
 - v0.3.0 NEW: `delete --yes`, `trending`, `hashtags <tag>`, `comments`, `config`, `new <series>`, `completion`; post `--desc-file/--allow-*/--cover/--timeout/--dry-run`; posts `--query/--sort`; download `--all`; analytics `--export`; batch `--shuffle/--resume/--state/--stop-on-error`; doctor ffmpeg/disk/env (62/62 tests)
 - PR #4 OPEN (fix/analytics-handle): analytics @handle now resolved from content dashboard fallback (the /analytics tab doesn't render @profile links). `captron analytics --json` returns handle: sim_test_runs. CI running.
 - PR #3 MERGED (feat/summary): `captron posts` now uses item_list API (per-post stats + download URLs via playAddr from SSR JSON). `[scheduled YYYY-MM-DD HH:MM]` tag on scheduled posts. `--posts <n>` combined analytics+posts view in one session. Docs updated.
@@ -40,5 +41,4 @@ active — v0.3.0; post flags/cover, delete, trending/hashtags/comments, config/
 - `node bin/captron.js analytics` → 8 metrics, handle: sim_test_runs
 - `node bin/captron.js download` → real MP4 saved (ftypisom magic)
 - publish RPC: POST /tiktok/web/project/post/v1/ returns {projectId, itemId, statusCode:0}
-- repo: github.com/Lucas-vdr-a11y/tiktok-cli (main, feat/analytics, fix/analytics-handle)
-- 62/62 unit tests pass; CI matrix: node 20 + node 22; `captron --help` lists 19 commands; v0.3.0
+- 64/64 unit tests pass; CI matrix: node 20 + node 22; 21 commands; v0.4.0; PR #5 (feat/v0.3-power) open
