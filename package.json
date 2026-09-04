@@ -16,7 +16,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "repository": {
     "type": "git",
@@ -27,8 +27,7 @@
     "url": "https://github.com/Lucas-vdr-a11y/tiktok-cli/issues"
   },
   "scripts": {
-    "test": "node --test test/unit/",
-    "test:unit": "node --test test/unit/",
+    "test": "node --test test/unit/*.test.js",
     "doctor": "node bin/captron.js doctor"
   },
   "keywords": [
