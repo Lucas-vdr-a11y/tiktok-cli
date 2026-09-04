@@ -46,6 +46,7 @@ captron content          # lists posts + drafts
 | `drafts [account]` | List saved drafts. |
 | `drafts --publish <id>` | Publish a saved draft. |
 | `drafts --delete <id>` | Delete a draft. |
+| `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. |
 | `content [account]` | Posts **and** drafts in one call. |
 | `analytics [account]` | Views, likes, comments, shares, followers, viewers (last 1/7/28/60 days). |
 | `batch <manifest>` | Post many videos from a JSON/CSV manifest. |

@@ -84,6 +84,28 @@ share_count, favorite_count, visibility (1=public/0=private), in_review,
 is_pinned, status (102 = published/live), cover_url[], download_info.download_urls[]`
 (signed CDN links, last entry is watermark-free play addr). See `src/posts.js`.
 
+## Published-posts API (item_list)
+
+The Studio "Content" tab loads posts from a **signature-free** JSON API:
+
+```
+POST /tiktok/creator/manage/item_list/v1/
+  content-type: application/json
+  agw-js-conv: str
+  body: {"cursor":0,"size":50,
+         "query":{"sort_orders":[{"field_name":"post_time","order":2}],
+                  "conditions":[],"is_recent_posts":false}}
+```
+
+- Paginate via `cursor` + `has_more` (cursor advances in 50s).
+- Each item: `item_id`, `desc`, `create_time`, `duration` (ms), per-post stats as strings
+  (`play_count`, `like_count`, `comment_count`, `share_count`, `favorite_count`),
+  `visibility` (1=public, 0=private), `in_review`, `is_pinned`, `cover_url[]`, and
+  `download_info.download_urls[]` — **direct MP4 download links** (last entry is the
+  stable `play/?video_id=...` API URL).
+- Used by `captron posts` (rich listing with stats + download URLs). DOM scraping
+  remains the fallback for drafts, which this endpoint does not return.
+
 ## Localization
 
 TikTok Studio localizes both labels and endpoints. Captron matches on stable attributes (input names, radio values) and falls back to a table of common labels in EN/NL/ES/FR/DE/PT/ZH/JA/KO. The schedule radio is `input[name="postSchedule"][value="schedule"]`; the publish button is the button whose text is one of `Post/Plaatsen/Publicar/Publier/...`.
