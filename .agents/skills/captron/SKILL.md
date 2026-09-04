@@ -21,8 +21,9 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 
 - `captron login [account]` — log in via QR; `--from seed.json` imports a session non-interactively
 - `captron whoami [--all]` — session status (`--all` sweeps every profile)
-- `captron accounts` — list profiles; `captron use <account>` switches active (instant, offline)
-- `captron post <video> [opts]` — upload + publish (or draft); `--to alice,bob` / `--all` fans out to many accounts, `--retries 2` retries, `--auto-fit` normalizes first, `--strict` fails on warnings
+- `captron accounts` — list profiles (`--remove <name> --yes` forgets one); `captron use <account>` switches active (instant, offline)
+- `captron drafts` — list drafts (`--all` sweeps); `--publish <id>` / `--delete <id>`
+- `captron post <video> [opts]` — upload + publish (or draft); `--to alice,bob` / `--all` fans out, `--retries 2` retries, `--auto-fit` normalizes first, `--strict` fails on warnings
 - `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
 - `captron probe <file>` — offline TikTok-readiness check (size, codec, duration, verdict)
 - `captron fit <input> -o <out>` — normalize to vertical 1080x1920 H.264/AAC via ffmpeg
@@ -37,7 +38,6 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron hook --niche <ai|money|fitness|story|tech> --count 5 --seed x` — offline viral hooks (deterministic)
 - `captron download [postId] -o out.mp4` — single video; `--all --limit 10 --out-dir ./clips --query <text>` for bulk
 - `captron delete <postId> --yes` — delete a published post (safety catch)
-- `captron drafts` — list drafts; `--publish <id>` / `--delete <id>`
 - `captron trending --limit 20` — trending hashtags (caption research)
 - `captron hashtags <tag>` — hashtag detail + related tags
 - `captron batch <manifest> [--delay 20 --jitter 8 --probe --auto-fit --retries 2 --state progress.json --resume progress.json --shuffle --stop-on-error --strict]` — post many; `--probe` pre-flights, `--auto-fit` normalizes, `--retries` retries each item; per-item `"account"` mixes accounts

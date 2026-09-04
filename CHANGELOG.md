@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.0 — 2026-09-04
+
+Account-management wave (108 tests pass).
+
+- `accounts --remove <name> --yes` — forget a profile entirely
+  (browser dir + config entry gone, active falls back; `--yes`
+  safety catch like `delete`). Verified live against temp profiles.
+- `drafts --all` — drafts list sweeps every account (publish/delete
+  stay single-account by design — drafts have no global ids).
+
 ## 0.12.0 — 2026-09-04
 
 Complete-the-sweep wave (105 tests pass).

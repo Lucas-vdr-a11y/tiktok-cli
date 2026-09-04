@@ -272,9 +272,17 @@ function buildProgram() {
 
   program
     .command('accounts')
-    .description('List configured account profiles.')
-    .action(() => {
+    .description('List configured account profiles (--remove forgets one).')
+    .option('--remove <name>', 'delete a profile and its session (requires --yes)', null)
+    .option('--yes', 'confirm deletion')
+    .action((opts) => {
       applyGlobals();
+      if (opts.remove) {
+        const res = auth.removeAccount(opts.remove, { yes: Boolean(opts.yes) });
+        printResult(res, (r) => (r.ok ? 'Removed "' + r.account + '"' + (r.activeAccount ? ' (active: ' + r.activeAccount + ')' : ' (no active account)') + ' ✔' : 'Remove failed: ' + r.error));
+        if (!res.ok) process.exit(1);
+        return;
+      }
       const res = auth.accounts();
       printResult(res, (r) => {
         const lines = ['Accounts:'];
@@ -596,8 +604,23 @@ function buildProgram() {
     .option('-l, --list', 'list drafts')
     .option('-p, --publish <id>', 'publish a draft by id')
     .option('-d, --delete <id>', 'delete a draft by id')
+    .option('--all', 'with --list: sweep drafts across every account (sequential)')
     .action(async (opts) => {
       applyGlobals();
+      if (opts.all && !opts.publish && !opts.delete) {
+        const swept = await auth.sweepAccounts((name) => contentLib.listDrafts({ account: name, headless: globalOptions.headless }), { fallback: globalOptions.account || 'main' });
+        const okCount = swept.filter((r) => r.ok !== false).length;
+        printResult({ ok: true, okCount, total: swept.length, accounts: swept }, (r) => {
+          const lines = ['Drafts sweep (' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (a.ok === false || a.error) { lines.push('  ✖ ' + (a.account || '?') + '  ' + (a.error || 'failed')); continue; }
+            lines.push('  @' + (a.account || '?') + '  ' + (a.items || []).length + ' drafts');
+            for (const it of (a.items || []).slice(0, 5)) lines.push('    ' + (it.id || '?') + '  ' + (it.caption || '').slice(0, 50));
+          }
+          return lines.join('\n');
+        });
+        return;
+      }
       if (opts.list || (!opts.publish && !opts.delete)) {
         const res = await contentLib.listDrafts({ account: globalOptions.account, headless: globalOptions.headless });
         printResult(res, (r) => {

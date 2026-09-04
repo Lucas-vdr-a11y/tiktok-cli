@@ -235,6 +235,27 @@ function useAccount(name) {
 }
 
 /**
+ * `captron accounts --remove <name> --yes` — forget a profile entirely:
+ * deletes its browser dir (cookies/session gone) and its config entry.
+ * Requires { yes:true } — re-login is the only way back. Offline.
+ */
+function removeAccount(name, { yes = false } = {}) {
+  if (!name || !String(name).trim()) return { ok: false, error: 'missing account name (usage: captron accounts --remove <name> --yes)' };
+  if (!yes) return { ok: false, error: 'refusing to delete "' + String(name).trim() + '" without --yes (sessions cannot be recovered)', account: String(name).trim() };
+  const fs = require('fs');
+  const account = String(name).trim();
+  const cfg = readConfig();
+  if (!(cfg.accounts || []).some((a) => a.name === account)) return { ok: false, error: 'unknown account "' + account + '"', account };
+  try {
+    fs.rmSync(profileDir(account), { recursive: true, force: true });
+  } catch (_) { /* dir may not exist on disk */ }
+  cfg.accounts = (cfg.accounts || []).filter((a) => a.name !== account);
+  if (cfg.activeAccount === account) cfg.activeAccount = (cfg.accounts[0] && cfg.accounts[0].name) || null;
+  writeConfig(cfg);
+  return { ok: true, account, removed: true, activeAccount: cfg.activeAccount };
+}
+
+/**
  * Import a session exported from another browser into a captron profile.
  * Accepts `{ cookies: [...], localStorage: {...} }` or a bare cookie array.
  * Same format as `scripts/seed-session.js`. Returns { ok, account, cookies }.
@@ -294,4 +315,4 @@ async function importSession({ account = 'main', file } = {}) {
   }
 }
 
-module.exports = { isLoggedIn, login, logout, whoami, whoamiAll, accounts, useAccount, resolveTargets, sweepAccounts, importSession };
+module.exports = { isLoggedIn, login, logout, whoami, whoamiAll, accounts, useAccount, removeAccount, resolveTargets, sweepAccounts, importSession };

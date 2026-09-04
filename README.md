@@ -38,9 +38,9 @@ captron content          # lists posts + drafts
 | Command | What it does |
 |---|---|
 | `login [account]` | Log in via QR code, or `login --from seed.json` to import a browser session non-interactively. State persists in `~/.captron/profiles/<account>`. |
-| `accounts` | List configured account profiles. |
+| `accounts` | List profiles (`--remove <name> --yes` forgets one entirely). |
 | `use <account>` | Switch the active profile (instant, offline). |
-| `whoami [--all]` | Session status (`--all` sweeps every profile). |
+| `drafts` | List drafts (`--all` sweeps fleet-wide); `--publish <id>` / `--delete <id>`. |
 | `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--to a,b` / `--all` fans out to many accounts. `--retries 2` retries, `--auto-fit` normalizes first, `--strict` fails on warnings. |
 | `probe <file>` | Offline TikTok-readiness check (size, codec, duration, verdict). |
 | `fit <input> -o <out>` | Normalize to vertical 1080x1920 H.264/AAC via ffmpeg (offline). |
@@ -52,7 +52,6 @@ captron content          # lists posts + drafts
 | `caption` | Offline caption builder (`--hook "..." --cta "..." -t tags --strict`). |
 | `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. `--all` sweeps every account. |
 | `hook` | Offline viral hook generator (`--niche ai|money|fitness|story|tech --count 5 --seed x`). |
-| `drafts [account]` | List drafts; `--publish <id>` / `--delete <id>`. |
 | `delete <postId> --yes` | Delete a published post (safety catch required). |
 | `trending` | Trending hashtags from Explore (caption research). |
 | `hashtags <tag>` | Hashtag detail + related tags. |
@@ -167,6 +166,7 @@ captron login bob --from seed.json   # or import a session non-interactively
 captron accounts               # list profiles (* = active)
 captron use alice              # switch active profile (instant, offline)
 captron whoami --all          # session status for every profile
+captron accounts --remove oldname --yes   # forget a profile (dir + entry gone)
 CAPTRON_ACCOUNT=bob captron post ./v.mp4   # one-off without switching
 ```
 
