@@ -18,13 +18,17 @@ async function launchProfile({ account = 'main', headless = false, userDataDir }
   const dir = userDataDir || profileDir(account);
   const channel = process.env.CAPTRON_BROWSER_CHANNEL || 'chrome';
   const executablePath = process.env.CAPTRON_CHROMIUM_PATH;
+  const envHeadless = /^(1|true|yes)$/i.test(String(process.env.CAPTRON_HEADLESS || ''));
+  const effectiveHeadless = Boolean(headless || envHeadless);
+  const locale = process.env.CAPTRON_LOCALE || 'en-US';
+  const timezoneId = process.env.CAPTRON_TIMEZONE || 'Europe/Amsterdam';
 
   const base = {
-    headless,
+    headless: effectiveHeadless,
     userDataDir: dir,
     viewport: { width: 1440, height: 2200 },
-    locale: 'en-US',
-    timezoneId: 'Europe/Amsterdam',
+    locale,
+    timezoneId,
     args: [
       '--disable-blink-features=AutomationControlled',
       '--disable-infobars',
@@ -40,7 +44,7 @@ async function launchProfile({ account = 'main', headless = false, userDataDir }
   else if (channel && channel !== 'bundled') base.channel = channel;
 
   try {
-    verbose(`launching browser (channel=${channel || 'bundled'}, headless=${headless}, dir=${dir})`);
+    verbose(`launching browser (channel=${channel || 'bundled'}, headless=${effectiveHeadless}, dir=${dir})`);
     const context = await chromium.launchPersistentContext(dir, base);
     return context;
   } catch (err) {

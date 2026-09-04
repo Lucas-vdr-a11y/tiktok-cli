@@ -4,6 +4,7 @@ const { launchProfile } = require('./browser');
 const { URLS } = require('./selectors');
 const { verbose, sleep } = require('./utils');
 const { isLoggedIn } = require('./auth');
+const { resolveHandleFromPage } = require('./content');
 
 /**
  * TikTok Studio analytics — reverse engineered.
@@ -124,6 +125,21 @@ async function fetchInsights(page, types, dateRange) {
 }
 
 /**
+ * Serialize an analytics result to CSV (one row per metric per day).
+ * Columns: metric,date,value. Totals are emitted as date='total' rows.
+ */
+function analyticsToCsv(result) {
+  const { toCsv } = require('./utils');
+  const rows = [];
+  for (const [name, m] of Object.entries((result && result.metrics) || {})) {
+    if (!m) continue;
+    if (m.total != null) rows.push({ metric: name, date: 'total', value: m.total });
+    for (const p of m.series || []) rows.push({ metric: name, date: p.date, value: p.value });
+  }
+  return toCsv(rows, ['metric', 'date', 'value']);
+}
+
+/**
  * `captron analytics` — account-level metrics for the last N days.
  * With `posts > 0`, also returns the most recent posts with per-post stats
  * (from /tiktok/creator/manage/item_list/v1/) in the same session.
@@ -131,8 +147,8 @@ async function fetchInsights(page, types, dateRange) {
  */
 async function analytics({ account = 'main', days = 7, posts = 0, headless = false } = {}) {
   const range = VALID_RANGES.includes(Number(days)) ? Number(days) : 7;
-  const overviewTypes = [METRICS.views, METRICS.profile_views, METRICS.likes, METRICS.comments, METRICS.shares, METRICS.followers, METRICS.new_viewers, METRICS.total_viewers];
-  const names = ['views', 'profile_views', 'likes', 'comments', 'shares', 'followers', 'new_viewers', 'total_viewers'];
+  const overviewTypes = [METRICS.views, METRICS.profile_views, METRICS.likes, METRICS.comments, METRICS.shares, METRICS.followers, METRICS.new_viewers, METRICS.total_viewers, METRICS.active_days, METRICS.active_hours];
+  const names = ['views', 'profile_views', 'likes', 'comments', 'shares', 'followers', 'new_viewers', 'total_viewers', 'active_days', 'active_hours'];
   const context = await launchProfile({ account, headless });
   try {
     if (!(await isLoggedIn(context))) return { ok: false, error: 'not logged in', account };
@@ -148,8 +164,10 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
       const key = RESPONSE_KEYS[type] || 'insight_type_' + type;
       metrics[names[i]] = parseSeries(body[key]);
     });
-    // Handle from studio chrome (same heuristic as content.js)
-    const handle = await page
+    // Handle from studio chrome (same heuristic as content.js).
+    // The analytics tab may not render profile links, so fall back to the
+    // content dashboard in the same session (no extra browser launch).
+    let handle = await page
       .evaluate(() => {
         const links = Array.from(document.querySelectorAll('a[href^="/@"]'));
         const chrome = links.find((a) => !/\/video\//.test(a.getAttribute('href') || ''));
@@ -157,6 +175,15 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
         return m ? m[1] : null;
       })
       .catch(() => null);
+    if (!handle) {
+      try {
+        const contentPage = await context.newPage();
+        await contentPage.goto(URLS.content, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await sleep(2000);
+        handle = await resolveHandleFromPage(contentPage).catch(() => null);
+        await contentPage.close().catch(() => {});
+      } catch (_) { /* keep null */ }
+    }
     const out = { ok: true, account, handle, range_days: range, metrics };
     if (Number(posts) > 0) {
       const { fetchItemPage, normalizeItem } = require('./posts');
@@ -177,5 +204,24 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
   }
 }
 
-module.exports = { analytics, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
+/**
+ * Best posting slots from viewer-activity metrics (pure, best-effort).
+ * active_days/active_hours series shapes vary by account — rank entries
+ * generically by value and report the top ones with their labels.
+ * Returns { days[], hours[], suggestion } (empty arrays when no data).
+ */
+function summarizeBestTimes(metrics) {
+  const top = (m, n) => {
+    const series = (m && Array.isArray(m.series) ? m.series : []).filter((p) => p && p.value != null);
+    return [...series].sort((a, b) => Number(b.value) - Number(a.value)).slice(0, n);
+  };
+  const days = top(metrics && metrics.active_days, 3);
+  const hours = top(metrics && metrics.active_hours, 3);
+  let suggestion = null;
+  if (hours.length) suggestion = 'peak viewer activity: ' + hours[0].date + ' (score ' + hours[0].value + ') — schedule ~1h before';
+  else if (days.length) suggestion = 'most active day: ' + days[0].date + ' (score ' + days[0].value + ')';
+  return { days, hours, suggestion };
+}
+
+module.exports = { analytics, analyticsToCsv, fetchInsights, summarizeBestTimes, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
 
