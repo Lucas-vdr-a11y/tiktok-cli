@@ -25,10 +25,12 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron whoami [account]` — session status + handle
 - `captron accounts` — list profiles
 - `captron post <video> [opts]` — upload + publish (or draft)
-- `captron posts [account]` — list published posts
+- `captron posts [account]` — list published posts with stats (views/likes/comments/shares) + download URLs
 - `captron drafts [account]` — list drafts
 - `captron drafts --publish <id>` / `--delete <id>`
+- `captron posts [account]` — published posts with per-post stats + download URLs
 - `captron content [account]` — posts + drafts in one call
+- `captron analytics [account] --days <1|7|28|60> --posts <n>` — account metrics + recent posts w/ stats in one call
 - `captron batch <manifest>` — post many (JSON/CSV)
 - `captron doctor` — environment check
 

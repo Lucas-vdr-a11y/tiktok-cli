@@ -42,11 +42,10 @@ captron content          # lists posts + drafts
 | `whoami [account]` | Show session status + handle. |
 | `accounts` | List configured account profiles. |
 | `post <video> [options]` | Upload + caption + publish (or draft) in one action. |
-| `posts [account]` | List published posts. |
+| `posts [account]` | Published posts **with stats** (views/likes/comments/shares) + download URLs. |
+| `download [postId]` | Download one of your published videos (default: most recent). |
+| `analytics [account]` | Views, likes, comments, shares, followers, viewers (last 1/7/28/60 days). |
 | `drafts [account]` | List saved drafts. |
-| `drafts --publish <id>` | Publish a saved draft. |
-| `drafts --delete <id>` | Delete a draft. |
-| `content [account]` | Posts **and** drafts in one call. |
 | `batch <manifest>` | Post many videos from a JSON/CSV manifest. |
 | `doctor` | Check environment, browser, profiles, session. |
 

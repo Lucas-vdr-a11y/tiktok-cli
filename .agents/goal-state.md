@@ -14,8 +14,8 @@ Completely reverse engineer TikTok and develop a CLI (for agents) whose main use
 active
 
 ## Progress
-- PR #1 open (feat/ci-and-doctor): doctor probes chromium+chrome engines w/ versions; CI matrix node 18/20/22 (syntax check + unit tests + CLI smoke); CONTRIBUTING.md
-- LICENSE (MIT) added — package.json declared MIT but file was missing (publish blocker)
+- PR #2 open (feat/analytics): `captron analytics` — reverse-engineered /tiktok/v1/analytics/insights/ batch API (no signature needed), insight_type map from probing 1..160, 8 metrics w/ daily series, ranges 1/7/28/60; 36 unit tests pass; docs updated
+- PR #1 MERGED (squash): doctor probes chromium+chrome engines w/ versions; CI matrix node 20/22; CONTRIBUTING.md; MIT LICENSE; npm publish metadata; engines >=20 (playwright), test glob fix
 - NEW: Core publish pipeline WORKS end-to-end (upload→caption→modal confirm→publish RPC→verify), EXIT=0, ~8s
 - Fixed: react-joyride tour overlay blocking clicks (clearTour + raw DOM click dispatch)
 - Fixed: post-Post confirmation modal ("Continue posting?") must be confirmed via "Post now"/"Nu plaatsen" button — was the root cause of publish never firing
