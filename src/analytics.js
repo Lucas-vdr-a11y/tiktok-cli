@@ -4,6 +4,7 @@ const { launchProfile } = require('./browser');
 const { URLS } = require('./selectors');
 const { verbose, sleep } = require('./utils');
 const { isLoggedIn } = require('./auth');
+const { resolveHandleFromPage } = require('./content');
 
 /**
  * TikTok Studio analytics — reverse engineered.
@@ -124,6 +125,21 @@ async function fetchInsights(page, types, dateRange) {
 }
 
 /**
+ * Serialize an analytics result to CSV (one row per metric per day).
+ * Columns: metric,date,value. Totals are emitted as date='total' rows.
+ */
+function analyticsToCsv(result) {
+  const { toCsv } = require('./utils');
+  const rows = [];
+  for (const [name, m] of Object.entries((result && result.metrics) || {})) {
+    if (!m) continue;
+    if (m.total != null) rows.push({ metric: name, date: 'total', value: m.total });
+    for (const p of m.series || []) rows.push({ metric: name, date: p.date, value: p.value });
+  }
+  return toCsv(rows, ['metric', 'date', 'value']);
+}
+
+/**
  * `captron analytics` — account-level metrics for the last N days.
  * With `posts > 0`, also returns the most recent posts with per-post stats
  * (from /tiktok/creator/manage/item_list/v1/) in the same session.
@@ -148,8 +164,10 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
       const key = RESPONSE_KEYS[type] || 'insight_type_' + type;
       metrics[names[i]] = parseSeries(body[key]);
     });
-    // Handle from studio chrome (same heuristic as content.js)
-    const handle = await page
+    // Handle from studio chrome (same heuristic as content.js).
+    // The analytics tab may not render profile links, so fall back to the
+    // content dashboard in the same session (no extra browser launch).
+    let handle = await page
       .evaluate(() => {
         const links = Array.from(document.querySelectorAll('a[href^="/@"]'));
         const chrome = links.find((a) => !/\/video\//.test(a.getAttribute('href') || ''));
@@ -157,6 +175,15 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
         return m ? m[1] : null;
       })
       .catch(() => null);
+    if (!handle) {
+      try {
+        const contentPage = await context.newPage();
+        await contentPage.goto(URLS.content, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+        await sleep(2000);
+        handle = await resolveHandleFromPage(contentPage).catch(() => null);
+        await contentPage.close().catch(() => {});
+      } catch (_) { /* keep null */ }
+    }
     const out = { ok: true, account, handle, range_days: range, metrics };
     if (Number(posts) > 0) {
       const { fetchItemPage, normalizeItem } = require('./posts');
@@ -177,5 +204,5 @@ async function analytics({ account = 'main', days = 7, posts = 0, headless = fal
   }
 }
 
-module.exports = { analytics, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
+module.exports = { analytics, analyticsToCsv, METRICS, VALID_RANGES, RESPONSE_KEYS, unwrap, parseSeries };
 

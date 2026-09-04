@@ -25,7 +25,7 @@ function parseManifest(file) {
     else if (parsed && typeof parsed === 'object') specs = [parsed];
     else throw new Error('manifest must be an array of post specs, {items:[...]}, or a single spec object');
   }
-  return specs.map((s, i) => ({ index: i, video: s.video || s.file || s.path, caption: s.caption, hashtags: s.hashtags, schedule: s.schedule, visibility: s.visibility, account: s.account || null, draft: s.draft === true || s.draft === 'true' || s.draft === 'draft' }));
+  return specs.map((s, i) => ({ index: i, video: s.video || s.file || s.path, caption: s.caption, hashtags: s.hashtags, schedule: s.schedule, visibility: s.visibility, account: s.account || null, draft: s.draft === true || s.draft === 'true' || s.draft === 'draft', allowComment: s.allowComment, allowDuet: s.allowDuet, allowStitch: s.allowStitch, cover: s.cover }));
 }
 
 function parseCsv(content) {
@@ -46,6 +46,7 @@ function parseCsv(content) {
 function buildPlan(specs, { defaultAccount, defaultDraft }) {
   return specs.map((s) => {
     const scheduleDate = parseSchedule(s.schedule);
+    const toBool = (v) => (v === true || v === 'true' || v === 'yes' || v === '1' ? true : v === false || v === 'false' || v === 'no' || v === '0' ? false : null);
     return {
       index: s.index,
       video: s.video,
@@ -56,6 +57,10 @@ function buildPlan(specs, { defaultAccount, defaultDraft }) {
       visibility: s.visibility || 'everyone',
       account: s.account || defaultAccount,
       draft: s.draft === true ? true : defaultDraft,
+      allowComment: toBool(s.allowComment),
+      allowDuet: toBool(s.allowDuet),
+      allowStitch: toBool(s.allowStitch),
+      cover: s.cover != null && s.cover !== '' ? Number(s.cover) : null,
       errors: validateSpec(s, scheduleDate),
     };
   });
@@ -71,29 +76,45 @@ function validateSpec(s, scheduleDate) {
 }
 
 /** Run a batch: post every spec, respecting per-account sessions + delay. */
-async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, dryRun = false, headless = false, maxPerDay = 0 } = {}) {
-  const specs = parseManifest(manifest);
-  const plan = buildPlan(specs, { defaultAccount, defaultDraft });
-
+async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = false, delaySec = 0, dryRun = false, headless = false, maxPerDay = 0, stopOnError = false, shuffle = false, resumeFrom = null, stateFile = null } = {}) {
+  let specs = parseManifest(manifest);
+  if (shuffle) {
+    for (let i = specs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [specs[i], specs[j]] = [specs[j], specs[i]];
+    }
+    specs.forEach((s, i) => (s.index = i));
+  }
+  let plan = buildPlan(specs, { defaultAccount, defaultDraft });
   const bad = plan.filter((p) => p.errors.length);
   if (bad.length) {
     for (const b of bad) fail('spec #' + (b.index + 1) + ': ' + b.errors.join('; ') + '  => ' + b.video);
     return { ok: false, total: specs.length, invalid: bad.length, planned: 0, results: [], reason: 'invalid specs' };
   }
-
   if (maxPerDay > 0 && plan.length > maxPerDay) {
-    plan.length = maxPerDay; // defensive cap for volume runs
+    plan = plan.slice(0, maxPerDay); // defensive cap for volume runs
     warn('Capped batch to ' + maxPerDay + ' posts (--max-per-day).');
   }
-
+  // Resume: skip items already recorded as ok in a previous state file.
+  let doneSet = new Set();
+  if (resumeFrom || stateFile) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(path.resolve(resumeFrom || stateFile), 'utf8'));
+      const arr = Array.isArray(prev) ? prev : prev.results || [];
+      for (const r of arr) if (r && r.ok && r.video) doneSet.add(path.resolve(r.video));
+    } catch (_) { /* fresh start */ }
+    const before = plan.length;
+    plan = plan.filter((p) => !doneSet.has(path.resolve(p.video || '')));
+    if (plan.length !== before) info('Resuming: skipped ' + (before - plan.length) + ' already-posted items.');
+  }
   if (dryRun) {
     const table = plan.map((p) => ({ video: p.video, caption: p.caption, schedule: p.schedule, account: p.account, draft: p.draft }));
     return { ok: true, dryRun: true, total: table.length, results: table };
   }
-
   info('Batch: ' + plan.length + ' posts (' + (defaultDraft ? 'DRAFT MODE' : 'LIVE PUBLISH') + ')');
   const contexts = {};
   const results = [];
+  let failed = 0;
   try {
     for (const spec of plan) {
       const acct = spec.account || defaultAccount;
@@ -109,16 +130,29 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
           schedule: spec.scheduleDate, // real Date
           visibility: spec.visibility,
           saveDraft: Boolean(spec.draft),
+          allowComment: spec.allowComment,
+          allowDuet: spec.allowDuet,
+          allowStitch: spec.allowStitch,
+          cover: spec.cover,
         });
         Object.assign(result, r);
         ok('  -> ' + (r.itemId || r.url || 'done'));
       } catch (err) {
         result.error = err.message;
         result.failed = true;
-        if (!(err instanceof NotLoggedInError)) fail('  error: ' + err.message);
-        throw err; // stop on first hard failure (login etc)
+        failed++;
+        if (err instanceof NotLoggedInError) {
+          fail('  error: ' + err.message);
+          throw err; // login failures always stop the run
+        }
+        fail('  error: ' + err.message);
+        if (stopOnError) throw err;
+        // default: continue with the next item (batch is for volume)
       } finally {
         results.push(result);
+        if (stateFile) {
+          try { fs.writeFileSync(path.resolve(stateFile), JSON.stringify({ manifest, results }, null, 2)); } catch (_) {}
+        }
         if (delaySec > 0 && spec.index < specs.length - 1) {
           info('  waiting ' + delaySec + 's before next…');
           await sleep(delaySec * 1000);
@@ -129,7 +163,7 @@ async function runBatch({ manifest, defaultAccount = 'main', defaultDraft = fals
     for (const cx of Object.values(contexts)) await cx.close().catch(() => {});
   }
   const okCount = results.filter((r) => r.ok).length;
-  return { ok: okCount === results.length, total: specs.length, okCount, results };
+  return { ok: failed === 0 && okCount === results.length, total: specs.length, posted: plan.length, skipped: specs.length - plan.length, okCount, failed, results };
 }
 
 module.exports = { parseManifest, buildPlan, runBatch };

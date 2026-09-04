@@ -116,6 +116,52 @@ async function downloadPost({ account = 'main', postId = null, out = null, headl
   }
 }
 
-module.exports = { downloadPost, extractPlayAddr, fetchPlayAddr };
+/**
+ * Bulk download: the N most recent posts (or every post matching `query`)
+ * into `outDir` as `<handle>-<id>.mp4`. Single session, sequential.
+ * Returns { ok, account, handle, downloaded, files[] }.
+ */
+async function downloadMany({ account = 'main', limit = 5, outDir = '.', query = null, headless = false, delaySec = 1 } = {}) {
+  const { sleep } = require('./utils');
+  const dir = path.resolve(outDir || '.');
+  fs.mkdirSync(dir, { recursive: true });
+  const context = await launchProfile({ account, headless });
+  try {
+    if (!(await isLoggedIn(context))) return { ok: false, error: 'not logged in', account, files: [] };
+    const page = await context.newPage();
+    await page.goto(URLS.content, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    await sleep(2500);
+    const handle = await resolveHandleFromPage(page);
+    if (!handle) return { ok: false, error: 'could not resolve @handle', account, files: [] };
+    let items = await collectPosts(page, Math.min(Math.max(Number(limit) || 5, 1), 200));
+    if (query) {
+      const q = String(query).toLowerCase();
+      items = items.filter((p) => (p.caption || '').toLowerCase().includes(q) || String(p.id).includes(q));
+    }
+    items = items.slice(0, Number(limit) || 5);
+    const files = [];
+    let downloaded = 0;
+    for (const post of items) {
+      try {
+        const { playAddr } = await extractPlayAddr(page, handle, post.id);
+        if (!playAddr) { files.push({ id: post.id, ok: false, error: 'no playAddr' }); continue; }
+        const body = await fetchPlayAddr(context, playAddr);
+        if (body.length < 1024) { files.push({ id: post.id, ok: false, error: 'body too small' }); continue; }
+        const file = path.join(dir, handle + '-' + post.id + '.mp4');
+        fs.writeFileSync(file, body);
+        files.push({ id: post.id, ok: true, file, bytes: body.length });
+        downloaded++;
+      } catch (err) {
+        files.push({ id: post.id, ok: false, error: String(err.message).split('\n')[0] });
+      }
+      if (delaySec > 0) await sleep(delaySec * 1000);
+    }
+    return { ok: downloaded > 0, account, handle, downloaded, total: items.length, files };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+module.exports = { downloadPost, downloadMany, extractPlayAddr, fetchPlayAddr };
 
 
