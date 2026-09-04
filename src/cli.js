@@ -237,9 +237,16 @@ function buildProgram() {
 
   program
     .command('logout [account]')
-    .description('Log out an account (clears its saved TikTok session).')
-    .action(async (account) => {
+    .description('Log out an account (--all clears every saved session).')
+    .option('--all', 'log out every known account (sequential)')
+    .action(async (account, opts) => {
       applyGlobals();
+      if (opts.all) {
+        const results = await auth.sweepAccounts((name) => auth.logout({ account: name }), { fallback: globalOptions.account || 'main' });
+        const okCount = results.filter((r) => r.loggedOut).length;
+        printResult({ ok: true, okCount, total: results.length, results }, (r) => 'Logged out ' + r.okCount + '/' + r.total + ' ✔');
+        return;
+      }
       const res = await auth.logout({ account: account || globalOptions.account || 'main' });
       printResult(res, (r) => 'Logged out ✔');
     });
@@ -340,10 +347,37 @@ function buildProgram() {
     .option('--sort <mode>', 'sort: new | top | liked', 'new')
     .option('--scheduled', 'only show scheduled posts')
     .option('--since <date>', 'only posts on/after date (YYYY-MM-DD)', null)
+    .option('--all', 'sweep every known account (sequential)')
     .option('--export <file>', 'write posts as CSV to <file>', null)
     .action(async (account, opts) => {
       applyGlobals();
       const { listPostsApi } = require('./posts');
+      if (opts.all) {
+        const params = { limit: Number(opts.limit), query: opts.query, sort: opts.sort, scheduledOnly: Boolean(opts.scheduled), since: opts.since, headless: globalOptions.headless };
+        const swept = await auth.sweepAccounts((name) => listPostsApi({ account: name, ...params }), { fallback: globalOptions.account || 'main' });
+        if (opts.export) {
+          for (const r of swept) {
+            if (!r.ok) continue;
+            try {
+              const rows = r.items.map((it) => ({ account: r.account, id: it.id, date: it.createTime ? new Date(it.createTime).toISOString().slice(0, 10) : '', caption: it.caption, views: it.stats.views, likes: it.stats.likes }));
+              require('fs').writeFileSync(utils.exportPath(opts.export, r.account), utils.toCsv(rows, ['account', 'id', 'date', 'caption', 'views', 'likes']));
+              r.exported = utils.exportPath(opts.export, r.account);
+            } catch (err) { r.exportError = err.message; }
+          }
+        }
+        const okCount = swept.filter((r) => r.ok).length;
+        printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept }, (r) => {
+          const lines = ['Posts sweep (' + r.okCount + '/' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (!a.ok) { lines.push('  ✖ ' + a.account + '  ' + (a.error || 'failed')); continue; }
+            const views = (a.items || []).reduce((s, it) => s + ((it.stats && it.stats.views) || 0), 0);
+            lines.push('  @' + (a.handle || a.account) + '  ' + a.items.length + ' posts · ' + views + ' views' + (a.exported ? '  [csv]' : ''));
+          }
+          return lines.join('\n');
+        });
+        if (okCount !== swept.length) process.exit(1);
+        return;
+      }
       const res = await listPostsApi({ account: account || globalOptions.account || 'main', limit: Number(opts.limit), query: opts.query, sort: opts.sort, scheduledOnly: Boolean(opts.scheduled), since: opts.since, headless: globalOptions.headless });
       if (res.ok && opts.export) {
         try {
@@ -424,9 +458,36 @@ function buildProgram() {
     .option('-d, --days <n>', 'range: 1, 7, 28 or 60 days', '7')
     .option('-p, --posts <n>', 'also include N most recent posts with per-post stats', '0')
     .option('--export <file>', 'write metrics as CSV to <file>', null)
+    .option('--all', 'sweep every known account (sequential)')
     .action(async (account, opts) => {
       applyGlobals();
       const { analytics, analyticsToCsv } = require('./analytics');
+      if (opts.all) {
+        const params = { days: Number(opts.days), posts: Number(opts.posts), headless: globalOptions.headless };
+        const swept = await auth.sweepAccounts((name) => analytics({ account: name, ...params }), { fallback: globalOptions.account || 'main' });
+        if (opts.export) {
+          for (const r of swept) {
+            if (!r.ok) continue;
+            try {
+              require('fs').writeFileSync(utils.exportPath(opts.export, r.account), analyticsToCsv(r));
+              r.exported = utils.exportPath(opts.export, r.account);
+            } catch (err) { r.exportError = err.message; }
+          }
+        }
+        const okCount = swept.filter((r) => r.ok).length;
+        printResult({ ok: okCount === swept.length, okCount, total: swept.length, accounts: swept }, (r) => {
+          const lines = ['Analytics sweep (' + r.okCount + '/' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (!a.ok) { lines.push('  ✖ ' + a.account + '  ' + (a.error || 'failed')); continue; }
+            const m = a.metrics || {};
+            const v = (n) => (m[n] && m[n].total != null ? m[n].total : '—');
+            lines.push('  @' + (a.handle || a.account) + '  views ' + v('views') + ' · likes ' + v('likes') + ' · followers ' + v('followers') + (a.exported ? '  [csv]' : ''));
+          }
+          return lines.join('\n');
+        });
+        if (okCount !== swept.length) process.exit(1);
+        return;
+      }
       const res = await analytics({ account: account || globalOptions.account || 'main', days: Number(opts.days), posts: Number(opts.posts), headless: globalOptions.headless });
       if (res.ok && opts.export) {
         try {
@@ -893,9 +954,32 @@ function buildProgram() {
     .option('--limit <n>', 'max posts', '20')
     .option('--comments <n>', 'max comments', '5')
     .option('--out <file>', 'write snapshot JSON to <file>', null)
+    .option('--all', 'sweep every known account (sequential, one session each)')
     .action(async (account, opts) => {
       applyGlobals();
       const { syncAccount } = require('./sync');
+      if (opts.all) {
+        const params = { days: Number(opts.days), limit: Number(opts.limit), commentsLimit: Number(opts.comments), headless: globalOptions.headless };
+        const swept = await auth.sweepAccounts((name) => syncAccount({ account: name, ...params }), { fallback: globalOptions.account || 'main' });
+        const combined = { ok: swept.every((r) => r.ok), okCount: swept.filter((r) => r.ok).length, total: swept.length, accounts: swept, syncedAt: new Date().toISOString() };
+        if (opts.out) {
+          try {
+            require('fs').writeFileSync(opts.out, JSON.stringify(combined, null, 2));
+            combined.snapshot = opts.out;
+          } catch (err) { combined.snapshotError = err.message; }
+        }
+        printResult(combined, (r) => {
+          const lines = ['Sync sweep (' + r.okCount + '/' + r.total + ' accounts):'];
+          for (const a of r.accounts) {
+            if (!a.ok) { lines.push('  ✖ ' + a.account + '  ' + (a.error || 'failed')); continue; }
+            lines.push('  @' + (a.handle || a.account) + '  ' + (a.posts ? a.posts.length : 0) + ' posts · ' + (a.totals ? a.totals.views : '?') + ' views · ' + (a.comments ? a.comments.length : 0) + ' comments');
+          }
+          if (r.snapshot) lines.push('  snapshot: ' + r.snapshot);
+          return lines.join('\n');
+        });
+        if (!combined.ok) process.exit(1);
+        return;
+      }
       const res = await syncAccount({ account: account || globalOptions.account || 'main', days: Number(opts.days), limit: Number(opts.limit), commentsLimit: Number(opts.comments), headless: globalOptions.headless });
       if (res.ok && opts.out) {
         try {

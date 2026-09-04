@@ -396,6 +396,16 @@ function toCsv(rows, columns) {
 }
 
 /**
+ * Per-account export path: "out.csv" + "alice" → "out-alice.csv".
+ * Used by --all sweeps so each account gets its own file.
+ */
+function exportPath(base, account) {
+  const b = String(base || 'export.csv');
+  const safe = String(account || 'unknown').replace(/[^a-z0-9-_]+/gi, '-');
+  const ext = path.extname(b) || '.csv';
+  return b.slice(0, b.length - path.extname(b).length) + '-' + safe + ext;
+}
+/**
  * Resolve which account profile to use.
  * Precedence: explicit CLI arg > CAPTRON_ACCOUNT env > saved active > 'main'.
  */
@@ -445,6 +455,7 @@ module.exports = {
   retry,
   readJsonFile,
   toCsv,
+  exportPath,
   resolveAccount,
   fileExists,
   validateVideoPath,

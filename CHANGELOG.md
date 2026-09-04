@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0 — 2026-09-04
+
+Fleet-sweep wave (102 tests pass).
+
+- `posts --all` / `analytics --all` / `sync --all` — read sweeps across
+  every profile (sequential, per-account results, combined summary;
+  full detail in `--json`). `--export` becomes per-account
+  (`metrics-alice.csv`…) via `utils.exportPath`; `sync --all --out`
+  writes one combined fleet snapshot.
+- `logout --all` — clear every saved session in one command.
+- `auth.sweepAccounts` — shared helper: a throwing account resolves as
+  `{ ok:false, account, error }` instead of killing the sweep.
+
 ## 0.10.0 — 2026-09-04
 
 Multi-account fan-out wave (99 tests pass).

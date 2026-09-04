@@ -26,9 +26,11 @@ This single command does the whole pipeline: upload → caption → (confirm mod
 - `captron post <video> --slideshow <paths>` — upload a slideshow of images (comma-separated, up to 10)
 - `captron probe <file>` — offline TikTok-readiness check (size, codec, duration, verdict)
 - `captron fit <input> -o <out>` — normalize to vertical 1080x1920 H.264/AAC via ffmpeg
-- `captron posts [account] --query <text> --sort top|liked --scheduled --since 2026-08-01 --export posts.csv` — posts with stats + download URLs
+- `captron posts [account] --query <text> --sort top|liked --scheduled --since 2026-08-01 --export posts.csv` — posts with stats + download URLs; `--all` sweeps every account
 - `captron content [account]` — posts + drafts in one call
-- `captron sync [account] --days 7 --limit 20 --comments 5 --out sync.json` — posts + analytics + comments in ONE browser session (daily digest)
+- `captron sync [account] --days 7 --limit 20 --comments 5 --out sync.json` — one-session digest; `--all` sweeps every account into one file
+- `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts; `--all` sweeps (exports become `<base>-<account>.csv`)
+- `captron logout [--all]` — clear sessions (`--all` clears every profile)
 - `captron calendar --days 14` — scheduled queue grouped by day
 - `captron caption --hook "..." -t ai,fyp --strict` — offline caption builder
 - `captron analytics [account] --days <1|7|28|60> --posts <n> --export metrics.csv` — metrics + posts in one call (now includes viewer-activity metrics)

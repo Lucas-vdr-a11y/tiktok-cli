@@ -170,6 +170,25 @@ function resolveTargets({ to = null, all = false, fallback = 'main' } = {}) {
   }
   return [fallback || 'main'];
 }
+
+/**
+ * Run an async per-account fn over every known profile (sequential).
+ * A throwing account resolves as { ok:false, account, error } so one
+ * broken profile never kills a fleet sweep. Used by --all read commands.
+ */
+async function sweepAccounts(fn, { fallback = 'main' } = {}) {
+  const names = resolveTargets({ all: true, fallback });
+  const out = [];
+  for (const name of names) {
+    try {
+      out.push(await fn(name));
+    } catch (err) {
+      out.push({ ok: false, account: name, error: String((err && err.message) || err).split('\n')[0] });
+    }
+  }
+  return out;
+}
+
 /** `captron logout [--account]` */
 async function logout({ account = 'main' } = {}) {
   const context = await launchProfile({ account });
@@ -275,4 +294,4 @@ async function importSession({ account = 'main', file } = {}) {
   }
 }
 
-module.exports = { isLoggedIn, login, logout, whoami, whoamiAll, accounts, useAccount, resolveTargets, importSession };
+module.exports = { isLoggedIn, login, logout, whoami, whoamiAll, accounts, useAccount, resolveTargets, sweepAccounts, importSession };

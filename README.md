@@ -44,12 +44,11 @@ captron content          # lists posts + drafts
 | `post <video> [options]` | Upload + caption + publish (or draft) in one action. `--to a,b` / `--all` fans out to many accounts. `--retries 2` retries, `--auto-fit` normalizes first, `--strict` fails on warnings. |
 | `probe <file>` | Offline TikTok-readiness check (size, codec, duration, verdict). |
 | `fit <input> -o <out>` | Normalize to vertical 1080x1920 H.264/AAC via ffmpeg (offline). |
-| `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--since 2026-08-01`, `--export posts.csv`. |
-| `download [postId]` | Download one of your published videos (default: most recent). `--all --limit 10 --out-dir ./clips` for bulk. |
-| `sync [account]` | One-session digest: posts + analytics + comments snapshot (`--days 7 --limit 20 --comments 5 --out sync.json`). Replaces 3 browser launches with 1. |
+| `posts [account]` | Published posts **with stats** + download URLs. `--query` filters, `--sort top` ranks, `--scheduled` only scheduled, `--since 2026-08-01`, `--export posts.csv`. `--all` sweeps every account. |
+| `analytics [account]` | Account metrics (`--posts <n>` recent posts, `--export out.csv`, viewer-activity via `best-time`). `--all` sweeps every account. |
+| `sync [account]` | One-session digest per account (`--out sync.json`). `--all` sweeps every account into one file. |
 | `calendar [account]` | Scheduled queue grouped by day (`--days 14`). |
 | `caption` | Offline caption builder (`--hook "..." --cta "..." -t tags --strict`). |
-| `analytics [account]` | Account metrics (+ recent posts w/ stats via `--posts <n>`, CSV via `--export out.csv`, viewer-activity via `best-time`). |
 | `best-time [account]` | Best posting slots from viewer activity (`--days 28`). |
 | `audit [account]` | Health check: totals, averages, top + flop posts, caption gaps. |
 | `hook` | Offline viral hook generator (`--niche ai|money|fitness|story|tech --count 5 --seed x`). |
@@ -181,6 +180,17 @@ captron post ./v.mp4 --all --dry-run      # preview the target list
 
 Per-item accounts in batch manifests (`"account": "alice"` per row) mix
 different videos across accounts in a single run.
+
+Fleet reads — one command across every profile (sequential, per-account
+results; a broken profile reports its error instead of killing the sweep):
+
+```bash
+captron whoami --all
+captron posts --all --sort top --limit 5
+captron analytics --all --days 28 --export metrics.csv   # metrics-alice.csv, metrics-bob.csv…
+captron sync --all --out fleet.json
+captron logout --all
+```
 
 Import an existing browser session (e.g. from a manual Chrome login) with:
 
