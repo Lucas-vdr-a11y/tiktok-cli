@@ -57,10 +57,11 @@ function normalizeItem(it) {
       shares: Number(it.share_count) || 0,
       favorites: Number(it.favorite_count) || 0,
     },
-    visibility: it.visibility === 1 ? 'public' : it.visibility === 0 ? 'private' : String(it.visibility),
+        visibility: it.visibility === 1 ? 'public' : it.visibility === 0 ? 'private' : String(it.visibility),
     inReview: !!it.in_review,
     pinned: !!it.is_pinned,
     status: it.status != null ? Number(it.status) : null,
+    scheduledTime: (it.schedule_time && Number(it.schedule_time) > 0) ? Number(it.schedule_time) * 1000 : null,
     coverUrl: Array.isArray(it.cover_url) && it.cover_url[0] ? it.cover_url[0] : null,
     // pre-signed CDN urls first (time-limited but directly fetchable), play-API url last
     downloadUrls: downloadUrls.length ? downloadUrls : [],
